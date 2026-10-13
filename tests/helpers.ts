@@ -11,8 +11,26 @@ export interface Client {
   patch: (url: string, body?: unknown) => Promise<any>;
 }
 
-export async function setup(opts: { url?: string } = {}) {
-  const db: Db = await openDb(opts.url ? { url: opts.url } : { file: ':memory:' });
+/**
+ * A fresh database per test file. Set TEST_DATABASE_URL=postgres://… to run the same tests
+ * against Postgres (PILOT-3); each setup gets its own new database there.
+ */
+async function freshDb(): Promise<Db> {
+  const base = process.env.TEST_DATABASE_URL;
+  if (!base) return openDb({ file: ':memory:' });
+  const pg = (await import('pg')).default;
+  const name = `commercia_t_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+  const admin = new pg.Client({ connectionString: base });
+  await admin.connect();
+  await admin.query(`CREATE DATABASE ${name}`);
+  await admin.end();
+  const url = new URL(base);
+  url.pathname = `/${name}`;
+  return openDb({ url: url.toString() });
+}
+
+export async function setup() {
+  const db: Db = await freshDb();
   const app = createApp(db);
   await setSetting(db.k, 'require_2fa', '0');
   await setSetting(db.k, 'shop_name', 'Sharma Kirana Store');

@@ -84,15 +84,16 @@ export async function saveVersion(
     .execute();
 }
 
+/** Next number in a series. One atomic UPDATE … RETURNING, so two people saving at once get consecutive numbers (BILL-5). */
 export async function nextCounter(tx: Tx, name: string): Promise<number> {
-  const row = await tx.selectFrom('counters').select('value').where('name', '=', name).executeTakeFirst();
-  if (!row) {
-    await tx.insertInto('counters').values({ name, value: 1 }).execute();
-    return 1;
-  }
-  const value = row.value + 1;
-  await tx.updateTable('counters').set({ value }).where('name', '=', name).execute();
-  return value;
+  await tx.insertInto('counters').values({ name, value: 0 }).onConflict((oc) => oc.column('name').doNothing()).execute();
+  const row = await tx
+    .updateTable('counters')
+    .set((eb) => ({ value: eb('value', '+', 1) }))
+    .where('name', '=', name)
+    .returning('value')
+    .executeTakeFirstOrThrow();
+  return Number(row.value);
 }
 
 export const toNum = (v: unknown): number => (v == null ? 0 : Number(v));

@@ -58,7 +58,10 @@ sales.get('/bills', async (c) => {
   const status = c.req.query('status');
   if (status) query = query.where('b.status', '=', status as 'active');
   else query = query.where('b.status', '!=', 'estimate');
-  if (q) query = query.where((eb) => eb.or([eb('b.number', 'like', `%${q}%`), eb('b.paper_ref', 'like', `%${q}%`), eb('b.customer_name', 'like', `%${q}%`)]));
+  if (q) {
+    const like = `%${q.toLowerCase()}%`;
+    query = query.where((eb) => eb.or([eb(eb.fn('lower', ['b.number']), 'like', like), eb(eb.fn('lower', ['b.paper_ref']), 'like', like), eb(eb.fn('lower', ['b.customer_name']), 'like', like)]));
+  }
   const rows = await query.execute();
   // Mode summary per bill, for the "Payment" column.
   const ids = rows.map((r) => r.id);

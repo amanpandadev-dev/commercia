@@ -21,7 +21,8 @@ export interface Db {
  * at go-live, set DATABASE_URL=postgres://… (Supabase) and the same queries run there.
  */
 export async function openDb(opts: { file?: string; url?: string } = {}): Promise<Db> {
-  const url = opts.url ?? process.env.DATABASE_URL;
+  // An explicit file always means SQLite, even when DATABASE_URL is set.
+  const url = opts.url ?? (opts.file ? undefined : process.env.DATABASE_URL);
   if (url && /^postgres(ql)?:\/\//.test(url)) {
     // `pg` is only needed after go-live: npm i pg
     const pg = (await import(/* @vite-ignore */ 'pg' as string)) as { default: { Pool: new (o: object) => unknown } };
