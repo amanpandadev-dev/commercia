@@ -28,6 +28,15 @@ On a fresh database (no seed), the first screen asks for the shop name and creat
 
 For development, `npm run dev` runs the API with reload on :8787 and Vite on :5173.
 
+### On Windows, without a terminal
+
+1. Install **Node.js LTS** from [nodejs.org](https://nodejs.org) (or run `winget install OpenJS.NodeJS.LTS`).
+2. Get the code. If `git clone` fails with a TLS or `schannel` error, use **Code → Download ZIP** on GitHub and unzip it.
+3. Double-click **`setup.bat`** in the folder. It installs packages, builds the app, and asks whether to load the demo shop. Run it again after each update.
+4. Double-click **`start.bat`**. The browser opens on http://localhost:8787. Keep the black window open while the app is in use; closing it stops Commercia.
+
+If Windows asks about the firewall, allow **Private networks** so phones on the shop Wi-Fi can connect. To start Commercia with Windows, put a shortcut to `start.bat` in the Startup folder (`Win+R`, then `shell:startup`).
+
 ## Using it at the shop (pilot)
 
 | Need | How |
