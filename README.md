@@ -1,0 +1,141 @@
+# Commercia
+
+Stock, bills, GST, payments and the customer khata for one kirana shop, in one private web app. Built from *Commercia — Product Requirements v1* and the demo walkthrough.
+
+- **Phone first.** Works on a mid-range Android phone at 360 px and grows into the sidebar layout on a laptop.
+- **English or Hindi.** Each person picks a language. Product names are stored in both, and Roman spellings (*chini*, *sarson*) find Hindi items.
+- **Every change is recorded.** Who did what and when goes into an activity log and a per-record history. The database itself refuses to edit or delete those rows, or the ledger.
+- **Pilot on one laptop, then Supabase.** The shop starts on a single SQLite file with no internet needed. The same code runs on Postgres at go-live (the tests pass on both).
+
+## Quick start
+
+Needs Node.js 20 or newer.
+
+```bash
+npm install
+npm run seed:demo   # optional: the "Sharma Kirana Store" demo shop from the video
+npm start           # builds the web app and serves it on http://localhost:8787
+```
+
+Demo logins (password `demo1234`):
+
+| User | Email | Role |
+| --- | --- | --- |
+| Ramesh Sharma | ramesh@shop.in | Admin (also has every Owner right) |
+| Amit Kumar | amit@shop.in | Entry person |
+
+On a fresh database (no seed), the first screen asks for the shop name and creates the Admin account.
+
+For development, `npm run dev` runs the API with reload on :8787 and Vite on :5173.
+
+## Using it at the shop (pilot)
+
+| Need | How |
+| --- | --- |
+| Start | `npm start` on the shop laptop. The console prints the address for this computer and for phones on the shop Wi-Fi (PILOT-2). Set `HOST=127.0.0.1` to keep it on the laptop only. |
+| Data | One file: `data/commercia.db`. Set `COMMERCIA_DB=/path/file.db` to put it elsewhere. |
+| Backups | Automatic every night after 9 pm, and at start-up if the last one is over a day old. The last 30 copies are kept. **Settings → Backup** has *Back up now*, *Download a copy*, and the folder setting (point it at a USB drive or a Google Drive/OneDrive synced folder). |
+| Products | **Import → Products & opening stock**: download the template, fill it in, upload, check the preview, confirm. The uploaded file isn't stored. Re-uploading the same file changes nothing. |
+| Old khata | **Import → Customer dues**: only *Name* and *Amount owed* are required. A negative amount means the customer has paid in advance. |
+| Wipe test data | **Settings → Before go-live** (Admin only; you type the shop name to confirm). Users and settings stay, and a backup is taken first. |
+
+### Restore a backup (ADM-3, PILOT-5)
+
+1. Stop the app (close the terminal window running `npm start`).
+2. Copy the backup you want, e.g. `backups/commercia-2026-10-12-21-10-00.db`, over `data/commercia.db`. Delete any `data/commercia.db-wal` and `data/commercia.db-shm` next to it.
+3. Run `npm start` again, then check **Dashboard** and **Reports → Day book** against what you expect.
+
+To rehearse this on another laptop, copy the backup there as `data/commercia.db` and run `npm start`. The totals should match.
+
+### Going live on Supabase (PILOT-6)
+
+```bash
+npm install pg
+DATABASE_URL="postgres://…supabase…" npm run move-to-postgres data/commercia.db
+```
+
+The script copies every table into the empty Postgres database. It then compares stock per item, every customer's balance, sales and payment totals, and stops with an error unless they match to the paisa. After that, run the app with `DATABASE_URL` set. All database-specific code is in `server/db/` (PILOT-3).
+
+## Roles
+
+The server checks permissions on every request, not just the screens (AUTH-3, PILOT-4). Refused attempts go into the activity log. The full table is in `shared/perms.ts`.
+
+| | Admin | Owner | Entry person |
+| --- | :-: | :-: | :-: |
+| Bills, stock in, payments, customers | ✓ | ✓ | ✓ |
+| Change a rate | applies at once | applies at once | sent for approval |
+| Cancel bills, reverse payments, adjust stock, record losses | ✓ | ✓ | report a shortage only |
+| Edit products, prices, GST, settings | ✓ | ✓ | — |
+| Reports, review, activity log, approvals | ✓ | ✓ | day book only |
+| Users | ✓ | ✓ (not Admins) | — |
+| Reset test data | ✓ | — | — |
+
+Owners and the Admin confirm each login with an authenticator-app code (AUTH-2). They set it up at their first login, from a QR code. The Admin can switch this off in **Settings → Security**; the demo seed switches it off.
+
+## How the numbers work
+
+- Money is stored as whole paise. Quantities are stored in thousandths of the base unit (2.5 kg = 2500). GST rates are stored in basis points (5% = 500).
+- **Stock is never typed in.** It is the sum of movements: deliveries, sales, cancellations, imports, adjustments, losses (STK-2). Each product's history shows the running total.
+- **Units and bags.** Each product counts stock in kg, L or pieces. It can have any number of larger units (Bag 50 kg, Box of 12, Tin 15 L), and each unit has its own price. Selling 2 bags + 7 kg removes 107 kg. Stock shows as "12 × Bag 50 kg + 7 kg".
+- **Rates are dated.** A bill line starts from the rate in force on the *bill's* date. The first time an item is billed on a date, the app asks "still ₹X?". An Entry person's new rate is saved on the bill as typed, marked *rate awaiting approval*, and sent to the Owners. If an Owner rejects it and sets their own rate, the bill is corrected, the difference goes on the customer's ledger as a correction entry, and the old version stays in the bill's history (RATE-1..6, open question 6).
+- **GST** is worked out per line and split into equal CGST and SGST, rounded to the paisa per line. The total is rounded to the rupee and the round-off is shown. The PRD's example (₹900 taxable → CGST ₹15.50 + SGST ₹15.50 → ₹931) is a test.
+  - A kaccha slip has the same total and GST as a tax invoice; it only prints differently.
+  - A bill with only 0% items prints as a Bill of Supply.
+  - The shop's GST scheme (Regular / Composition / Not registered) is dated in Settings and decides how bills print from that date on.
+- **Numbers** run in separate series for receipts, tax invoices and estimates. They restart every April with the year (`INV/26-27/0001`), and are never reused or skipped.
+- **Corrections** happen only by reversal. Cancelled bills keep their number. Reversed payments and loss reversals stay visible next to the originals.
+
+## What's in v1
+
+Release 1 **Must** items, all built:
+
+- **Access:** login, roles, user management (AUTH-1..4).
+- **Catalogue:** category tree, products, packs, loose and packed items, aliases (CAT-1..5).
+- **Units and bags:** UNIT-1..5.
+- **Search:** SRCH-1..6 and SRCH-8.
+- **Stock and losses:** STK-1..4, LOSS-1..3.
+- **Import:** IMP-1..7, IMP-9, MIG-1..5.
+- **Rates and approvals:** RATE-1..6.
+- **Billing and GST:** BILL-1..7, BILL-11, BILL-12, GST-1..3, GST-7.
+- **Ledger and payments:** LED-1..6, PAY-1..5.
+- **Dashboard, reports and history:** REP-1..5, HIST-1..3.
+- **Day book:** DAY-1..3.
+- **Settings and pilot:** ADM-1, ADM-3, PILOT-1..6.
+
+**Should** and **Could** items also built: sign out everywhere (AUTH-5), rename and move categories (CAT-6), usual buying and selling unit (UNIT-6), repeat a supplier's last delivery (STK-5), loss report and this month's losses (LOSS-5), header matching for your own spreadsheet columns (IMP-8, by common names), paper bill reference, duplicate warning, discount, Bill of Supply (BILL-8..10, BILL-13), dues ageing (LED-7), WhatsApp reminder (LED-8), stock value and Excel export of lists (REP-6, REP-7), version-to-version changes (HIST-4, consecutive versions), price history (HIST-5), payment references (PAY-6, stored and shown), pending-approval badge (RATE-7), day book filters and export (DAY-6, DAY-7), and the reset (PILOT-7).
+
+### Not built yet
+
+| Item | Note |
+| --- | --- |
+| Password reset by email (part of AUTH-1) | Needs an email service; the pilot is offline. The Admin or an Owner resets passwords in **Users**. |
+| Entry-person edit window (AUTH-6, open question 7) | Owners correct entries by cancelling and re-entering. Next step: allow edits to one's own bill for the window in Settings (default 60 min). |
+| Category merge, category chips on New Bill, voice search, photos | CAT-6 (merge part), SRCH-7, SRCH-9, CAT-8 |
+| Physical count mode, theft attachments | STK-6, LOSS-4 |
+| Remembering a custom column mapping; old `.xls` files | IMP-8 (custom part). `.xls` asks the user to save as `.xlsx`. |
+| Bulk GST update, IGST, composition quarterly summary | GST-4. GST-5 was left out per open question 4. GST-6 is partial: the Bill of Supply declaration prints. |
+| Cheque status, bank checking, mode-mix chart | PAY-7, PAY-9, PAY-8 (the `/api/reports/mode-mix` data exists; there is no chart yet) |
+| Cash count and close the day | DAY-4, DAY-5 |
+| Monthly profit, restore old versions, rate trend chart | REP-8, HIST-6, RATE-8 (the history list exists) |
+| Hosted-only items | Nightly R2 backups with failure email (ADM-2), storage meter (ADM-4), monthly Excel export file (ADM-5; there is a full JSON export), yearly archive (ADM-6), database-down alert (ADM-7) |
+| Hosting on Cloudflare Workers | The API (`server/app.ts`) is plain Hono and Workers-friendly. The Node entry point and the SQLite driver are not; a Workers entry point with a Postgres driver is still to do. |
+
+## Project layout
+
+```
+shared/            GST and totals, money, units, search, permissions — used by server and screens
+server/db/         schema, migrations, SQLite/Postgres connection (the only database-specific code)
+server/lib/        billing, rates, catalogue, importer, backups, auth helpers
+server/routes/     the HTTP API
+server/scripts/    seed-demo, move-to-postgres
+web/src/           React screens
+tests/             vitest: GST/units/search rules and full API flows
+```
+
+## Tests
+
+```bash
+npm test          # SQLite in memory
+npm run test:pg   # the same tests on Postgres (set TEST_DATABASE_URL to a server you can create databases on)
+npm run typecheck
+```
