@@ -7,7 +7,7 @@ import { ledgerEntry } from './billing';
 import { saveStockIn } from '../routes/stock';
 import { parseRupees, parseQty, formatRupees } from '../../shared/money';
 import { parseExtraUnits, type UnitDef } from '../../shared/units';
-import { isIsoDate, istDate } from '../../shared/dates';
+import { formatDate, isIsoDate, istDate } from '../../shared/dates';
 import type { User } from '../db/schema';
 
 export type ImportKind = 'products' | 'stock' | 'customers';
@@ -509,7 +509,7 @@ export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: R
         if (amt !== 0) {
           await ledgerEntry(tx, user, {
             customerId: cid, date: asOf, kind: 'opening', refType: 'import', refId: imp.id,
-            debit: amt > 0 ? amt : 0, credit: amt < 0 ? -amt : 0, note: `Opening balance as on ${asOf}`, importId: imp.id,
+            debit: amt > 0 ? amt : 0, credit: amt < 0 ? -amt : 0, note: `Opening balance as on ${formatDate(asOf)}`, importId: imp.id,
           });
           total += amt;
         }

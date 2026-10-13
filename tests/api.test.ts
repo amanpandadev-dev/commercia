@@ -297,7 +297,7 @@ describe('spreadsheet import', () => {
     const pooja = customers.find((c: any) => c.name === 'Pooja');
     expect(pooja.balance).toBe(-50000);
     const led = await owner.get(`/api/customers/${pooja.id}/ledger`);
-    expect(led.entries[0].note).toBe('Opening balance as on 2026-10-01');
+    expect(led.entries[0].note).toBe('Opening balance as on 01-10-2026');
     // Filling in a phone later leaves the balance alone (MIG-3).
     await owner.patch(`/api/customers/${pooja.id}`, { name: 'Pooja', phone: '9811112222' });
     expect((await owner.get(`/api/customers/${pooja.id}/ledger`)).balance).toBe(-50000);
