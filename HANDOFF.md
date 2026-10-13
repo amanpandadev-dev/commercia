@@ -41,6 +41,11 @@ The demo logins use password `demo1234`:
 
 The seed switches authenticator codes off. A fresh install leaves them on.
 
+**On Windows** (the shop laptop), no terminal is needed. Download the repo (**Code → Download ZIP** works if `git clone` fails), unzip it, and double-click:
+
+- `setup.bat`: checks Node.js, installs packages, builds, and offers to load the demo shop. Run it once, and again after each update.
+- `start.bat`: starts Commercia and opens it in the browser. Keep its window open while the shop uses the app.
+
 The data lives in `data/commercia.db`. Set `COMMERCIA_DB` to put it elsewhere, or `DATABASE_URL=postgres://…` to run on Postgres instead. `data/` and `backups/` are gitignored.
 
 ---
@@ -170,8 +175,8 @@ web/src/       pages/ (one file per screen), components/ (ui, Layout, ProductFor
 
 ### Before the pilot starts
 1. **Install on the shop laptop.**
-   - Install Node 20 or 22 LTS, then run `npm install`. `better-sqlite3` ships prebuilt Windows binaries; check they install.
-   - Add a `start-commercia.bat` that runs `npm run serve` (after one `npm run build`) and put it in the Startup folder.
+   - Install Node.js LTS, then run `setup.bat` and `start.bat` (section 2). `better-sqlite3` ships prebuilt Windows binaries for LTS releases; check they install on the shop laptop. The scripts were written in a Linux container and haven't been run on Windows yet.
+   - To start with Windows, put a shortcut to `start.bat` in the Startup folder (`Win+R`, then `shell:startup`).
    - Set **Settings → Backup folder** to a Google Drive or USB path.
    - Open question 5 says one device for now, so the laptop's Wi-Fi address can be ignored.
 2. **Rehearse a restore** (ADM-3, PILOT-5). Restore last night's copy on a second machine and compare the Dashboard and Day book.
