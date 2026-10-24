@@ -425,6 +425,9 @@ reports.get('/reports/review', async (c) => {
     .selectFrom('bills as b')
     .leftJoin('users as u', 'u.id', 'b.created_by')
     .select(['b.id', 'b.number', 'b.customer_name', 'b.bill_date', 'b.total_paise', 'b.rate_pending', 'b.needs_review', 'u.name as by'])
+    .select((eb) =>
+      eb.selectFrom('bill_lines as bl').select((e) => e.fn.countAll<number>().as('n')).whereRef('bl.bill_id', '=', 'b.id').where('bl.price_override', '=', 1).as('own_prices'),
+    )
     .where('b.status', '=', 'active')
     .where((eb) => eb.or([eb('b.rate_pending', '=', 1), eb('b.needs_review', '=', 1)]))
     .orderBy('b.id', 'desc')

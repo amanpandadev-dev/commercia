@@ -145,6 +145,81 @@ describe('Commercia API', () => {
     expect(tea.units[0].retail).toBe(13500);
   });
 
+  describe('a price typed for one bill only', () => {
+    const officialOf = async (productId: number) => (await owner.get('/api/catalog')).products.find((p: any) => p.id === productId).units[0].retail;
+    const oilBill = (client: Client, ratePaise: number, extra: object = {}) =>
+      client.post('/api/bills', {
+        kind: 'receipt', customerId: sunita.id, billDate: today,
+        lines: [{ productId: items.oil.id, unitId: items.oil.L, qtyMilli: 1000, ratePaise, oneOff: true }],
+        payments: [], ...extra,
+      });
+
+    it("uses the typed price on the bill and leaves the item's price alone, for an Owner", async () => {
+      const before = await officialOf(items.oil.id);
+      const requestsBefore = (await owner.get('/api/rates/requests')).length;
+      const bill = await oilBill(owner, 15000);
+      expect(bill.ratePending).toBe(false);
+      expect(await officialOf(items.oil.id)).toBe(before);
+      expect((await owner.get('/api/rates/requests')).length).toBe(requestsBefore);
+      const d = await owner.get(`/api/bills/${bill.id}`);
+      expect(d.lines[0].rate_paise).toBe(15000);
+      expect(d.lines[0].official_rate_paise).toBe(before);
+      expect(d.lines[0].price_override).toBe(1);
+      expect(d.bill.total_paise).toBe(15800); // 150 + 5% GST = 157.50, rounded to the rupee
+      expect(d.bill.needs_review).toBe(0);
+    });
+
+    it('lets the Entry person do the same without an approval, and flags the bill for the Owner', async () => {
+      const before = await officialOf(items.oil.id);
+      const requestsBefore = (await owner.get('/api/rates/requests')).length;
+      const bill = await oilBill(entry, 15500);
+      expect(bill.ratePending).toBe(false);
+      expect(await officialOf(items.oil.id)).toBe(before);
+      expect((await owner.get('/api/rates/requests')).length).toBe(requestsBefore);
+      const d = await owner.get(`/api/bills/${bill.id}`);
+      expect(d.bill.rate_pending).toBe(0);
+      expect(d.bill.needs_review).toBe(1);
+      const review = await owner.get('/api/reports/review');
+      expect(Number(review.flagged.find((b: any) => b.id === bill.id).own_prices)).toBe(1);
+      const log = await owner.get('/api/activity');
+      expect(log.some((a: any) => a.summary.includes('own price on 1 item'))).toBe(true);
+    });
+
+    it('ignores the flag when the typed price equals the item price', async () => {
+      const bill = await oilBill(entry, await officialOf(items.oil.id));
+      const d = await owner.get(`/api/bills/${bill.id}`);
+      expect(d.lines[0].price_override).toBe(0);
+      expect(d.bill.needs_review).toBe(0);
+    });
+
+    it("keeps the price through an estimate and its conversion, without changing the item's price", async () => {
+      const before = await officialOf(items.oil.id);
+      const est = await oilBill(owner, 14500, { estimate: true });
+      const bill = await owner.post(`/api/bills/${est.id}/convert`, {});
+      expect(bill.ratePending).toBe(false);
+      expect(await officialOf(items.oil.id)).toBe(before);
+      const d = await owner.get(`/api/bills/${bill.id}`);
+      expect(d.lines[0].rate_paise).toBe(14500);
+      expect(d.lines[0].price_override).toBe(1);
+    });
+
+    it("does not let a rejected rate request overwrite a price typed for this bill", async () => {
+      const bill = await entry.post('/api/bills', {
+        kind: 'receipt', customerId: sunita.id, billDate: today,
+        lines: [
+          { productId: items.oil.id, unitId: items.oil.L, qtyMilli: 1000, ratePaise: 18000 }, // a real rate change, sent for approval
+          { productId: items.oil.id, unitId: items.oil.L, qtyMilli: 1000, ratePaise: 15000, oneOff: true },
+        ],
+        payments: [],
+      });
+      expect(bill.ratePending).toBe(true);
+      const req = (await owner.get('/api/rates/requests')).find((r: any) => r.bill_id === bill.id);
+      await owner.post('/api/rates/requests/decide', { decisions: [{ id: req.id, approve: false, finalPaise: 16500 }] });
+      const d = await owner.get(`/api/bills/${bill.id}`);
+      expect(d.lines.map((l: any) => l.rate_paise)).toEqual([16500, 15000]);
+    });
+  });
+
   it('suggests the rate in force on the bill date, not today (RATE-2)', async () => {
     const yesterday = addDays(today, -1);
     const cat = await owner.get(`/api/catalog?date=${yesterday}`);

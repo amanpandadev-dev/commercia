@@ -237,6 +237,8 @@ export interface BillLinesTable {
   cgst_paise: number;
   sgst_paise: number;
   base_milli: number;
+  /** 1 = a price typed for this bill only; the item's own price was not touched. */
+  price_override: Generated<number>;
 }
 
 export interface PaymentsTable {

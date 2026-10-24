@@ -134,7 +134,7 @@ export function BillDoc({ d, paper }: { d: BillDetail; paper: 'A4' | 'thermal' }
           {d.lines.map((l, i) => (
             <tr key={l.id}>
               <td>{i + 1}</td>
-              <td>{l.name_en}{l.name_hi && <span style={{ color: '#666' }}> · {l.name_hi}</span>}</td>
+              <td>{l.name_en}{l.name_hi && <span style={{ color: '#666' }}> · {l.name_hi}</span>}{l.price_override === 1 && <span className="no-print tag warn" style={{ marginLeft: 6 }}>own price · list {(l.official_rate_paise / 100).toFixed(2)}</span>}</td>
               {showTax && <td>{l.hsn}</td>}
               <td className="r q">{qty(l.qty_milli)} {l.unit_name}</td>
               <td className="r">{(lineRate(l) / 100).toFixed(2)}</td>

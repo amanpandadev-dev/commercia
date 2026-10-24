@@ -244,7 +244,13 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     .addColumn('cgst_paise', 'integer', notNull)
     .addColumn('sgst_paise', 'integer', notNull)
     .addColumn('base_milli', 'integer', notNull)
+    .addColumn('price_override', 'integer', zero)
     .execute();
+  // Databases made before one-off bill prices existed.
+  const billLines = (await db.introspection.getTables()).find((t) => t.name === 'bill_lines');
+  if (billLines && !billLines.columns.some((c) => c.name === 'price_override')) {
+    await db.schema.alterTable('bill_lines').addColumn('price_override', 'integer', zero).execute();
+  }
 
   await idCol(db.schema.createTable('payments').ifNotExists())
     .addColumn('customer_id', 'integer')

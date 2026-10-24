@@ -163,7 +163,7 @@ sales.post('/bills/:id/convert', async (c) => {
         billDate: body.billDate && isIsoDate(body.billDate) ? body.billDate : istDate(),
         paperRef: est.paper_ref,
         discount: est.discount_paise ? { type: 'amount', value: est.discount_paise } : null,
-        lines: lines.map((l) => ({ productId: l.product_id, unitId: l.unit_id, qtyMilli: l.qty_milli, ratePaise: l.rate_paise })),
+        lines: lines.map((l) => ({ productId: l.product_id, unitId: l.unit_id, qtyMilli: l.qty_milli, ratePaise: l.rate_paise, oneOff: l.price_override === 1 })),
         payments: body.payments,
       },
       { fromEstimateId: id },

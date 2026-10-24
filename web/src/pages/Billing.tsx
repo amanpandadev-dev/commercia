@@ -20,6 +20,8 @@ interface Line {
   qty: string;
   rate: string; // rupees, as typed
   rateEdited: boolean;
+  /** A typed price is for this bill only unless the person chooses to change the item's rate. Saved drafts without it count as 'bill'. */
+  rateScope?: 'bill' | 'item';
 }
 
 const MODE_ICON: Record<Mode, React.ReactNode> = {
@@ -175,6 +177,8 @@ export function Billing() {
     // Recording the answer marks this item/unit/date as checked; a changed rate travels with the bill.
     api.post('/api/rates/check', { unitId: l.unitId, list, date: billDate }).catch(() => {});
     setChecked((c) => new Set(c).add(k));
+    // "Changed" means the shop's own rate moved: that is a real rate change, not a price for this bill.
+    if (!same) upd(l.key, { rateScope: 'item' });
     if (!same) setTimeout(() => (document.querySelector(`[data-rate="${l.key}"]`) as HTMLInputElement | null)?.select(), 30);
   };
 
@@ -203,7 +207,7 @@ export function Billing() {
       billDate,
       paperRef,
       discount: discount.trim() ? (discountType === 'amount' ? { type: 'amount', value: parseRupees(discount) || 0 } : { type: 'percent', value: Math.round((parseFloat(discount) || 0) * 100) }) : null,
-      lines: lines.map((l) => ({ productId: l.productId, unitId: l.unitId, qtyMilli: parseQty(l.qty), ratePaise: parseRupees(l.rate) })),
+      lines: lines.map((l) => ({ productId: l.productId, unitId: l.unitId, qtyMilli: parseQty(l.qty), ratePaise: parseRupees(l.rate), oneOff: l.rateScope !== 'item' })),
       payments: kind === 'estimate' ? [] : paidParts.filter((p) => p.paise > 0).map((p) => ({ mode: p.mode, amountPaise: p.paise, reference: p.reference })),
     };
     if (body.lines.some((l) => !(l.qtyMilli > 0))) return setErr('Every line needs a quantity');
@@ -351,11 +355,21 @@ export function Billing() {
                         <td className="name">
                           <b>{lang === 'hi' && p.nameHi ? p.nameHi : p.nameEn}</b>
                           <span className="hi">{lang === 'hi' ? p.nameEn : p.nameHi}{showTax && <span className="faint"> · GST {formatRate(p.gstBp)}</span>}</span>
-                          {changed && (
-                            <span className={`tag ${can('price.set') ? 'info' : 'warn'}`} style={{ marginTop: 3 }}>
-                              {can('price.set') ? `New rate from ${shortDate(billDate)}` : t('rate awaiting approval')} (was {rs(off)})
+                          {changed && (l.rateScope === 'item' ? (
+                            <span className="row gap-4 wrap" style={{ marginTop: 3 }}>
+                              <span className={`tag ${can('price.set') ? 'info' : 'warn'}`}>
+                                {can('price.set') ? `New rate from ${shortDate(billDate)}` : t('rate awaiting approval')} (was {rs(off)})
+                              </span>
+                              <button type="button" className="btn sm ghost" onClick={() => upd(l.key, { rateScope: 'bill' })}>This bill only</button>
                             </span>
-                          )}
+                          ) : (
+                            <span className="row gap-4 wrap" style={{ marginTop: 3 }}>
+                              <span className="tag info">This bill only · list {rs(off)}</span>
+                              <button type="button" className="btn sm ghost" title="Change the item's own rate from this bill's date, not just this bill" onClick={() => upd(l.key, { rateScope: 'item' })}>
+                                {can('price.set') ? 'Change rate' : 'Ask Owner'}
+                              </button>
+                            </span>
+                          ))}
                         </td>
                         <td>
                           <div className="row gap-4 nowrap">
@@ -365,7 +379,7 @@ export function Billing() {
                             {p.units.length > 1 ? (
                               <select className="input sm" style={{ width: 'auto' }} value={l.unitId} onChange={(e) => {
                                 const nu = p.units.find((x) => x.id === Number(e.target.value))!;
-                                upd(l.key, { unitId: nu.id, rate: toRupeeStr(priceFor(nu, list)), rateEdited: false });
+                                upd(l.key, { unitId: nu.id, rate: toRupeeStr(priceFor(nu, list)), rateEdited: false, rateScope: 'bill' });
                               }}>
                                 {p.units.map((x) => <option key={x.id} value={x.id}>{unitShort(x, p)}</option>)}
                               </select>

@@ -32,12 +32,12 @@ export function Review() {
       {counts.pendingRates > 0 && <div className="banner"><Link to="/rates?tab=approvals" style={{ color: 'inherit' }}><b>{counts.pendingRates}</b> rate change(s) are waiting for approval →</Link></div>}
       <div className="grid grid-2">
         <div className="card">
-          <div className="card-head"><h3>Bills to check</h3><span className="muted" style={{ fontSize: 12 }}>Rate awaiting approval, or corrected after a rejected rate</span></div>
+          <div className="card-head"><h3>Bills to check</h3><span className="muted" style={{ fontSize: 12 }}>Rate awaiting approval, own price typed by the Entry person, or corrected after a rejected rate</span></div>
           {d.flagged.length === 0 ? <Empty>Nothing flagged</Empty> : d.flagged.map((b: any) => (
             <div key={b.id} className="list-item" onClick={() => nav(`/bills/${b.id}`)}>
               <div className="grow"><b style={{ fontWeight: 600 }}>{b.number}</b> <span className="muted">{b.customer_name || 'Walk-in'}</span><div className="faint" style={{ fontSize: 12 }}>{b.bill_date} · {b.by}</div></div>
               <span className="num">{rs(b.total_paise, false)}</span>
-              {b.rate_pending ? <span className="tag warn">rate pending</span> : <span className="tag info">corrected</span>}
+              {b.rate_pending ? <span className="tag warn">rate pending</span> : Number(b.own_prices) > 0 ? <span className="tag warn">own price</span> : <span className="tag info">corrected</span>}
             </div>
           ))}
         </div>
