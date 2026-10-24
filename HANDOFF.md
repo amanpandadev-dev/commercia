@@ -15,8 +15,8 @@ This note is for whoever picks up Commercia next. It covers what's built, how it
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | clean |
-| `npm test` (SQLite, in memory) | 34 / 34 pass |
-| `npm run test:pg` (Postgres 16) | the same 34 / 34 pass |
+| `npm test` (SQLite, in memory) | 63 / 63 pass |
+| `npm run test:pg` (Postgres 16) | the same 63 / 63 pass |
 | `npm run build` | builds |
 | End-to-end in headless Chromium, with demo data | login; a keyboard-only walk-in bill with A4 and thermal print; a credit tax invoice with a split payment; receiving a payment in the ledger; a CSV dues import; the Hindi switch; billing on a 360 px phone. No console errors, and no page scrolls sideways at 360 px. |
 | `move-to-postgres` on the demo database | all 24 tables copied. Stock, dues, sales and payment totals are identical. After the move, a new bill on Postgres got id 52 and number `R/26-27/0044`, so numbering continues. |
@@ -64,15 +64,15 @@ The data lives in `data/commercia.db`. Set `COMMERCIA_DB` to put it elsewhere, o
 ```
 shared/        Rules used by both server and screens:
                gst.ts (totals, GST, round-off, print type), money.ts (paise, ₹ formatting),
-               units.ts (bags ↔ kg, "12 × Bag 50 kg + 7 kg"), search.ts (fuzzy search),
+               units.ts (bags ↔ kg, pack kinds, "12 × Bag 50 kg + 7 kg"), search.ts (fuzzy search),
                perms.ts (the single permission table), dates.ts (India time)
 server/db/     schema.ts (types), migrate.ts (tables, indexes, append-only triggers), index.ts (open SQLite or Postgres)
                ← the only database-specific code
-server/lib/    billing.ts (create, cancel, rate correction, payments), rates.ts (dated prices, approval requests),
+server/lib/    suppliers.ts (purchase ledger, supplier payments), billing.ts (create, cancel, rate correction, payments), rates.ts (dated prices, approval requests),
                catalog.ts (price/GST on a date, stock, catalogue snapshot), importer.ts (preview/commit/undo),
                backup.ts, settings.ts, crypto.ts (scrypt, TOTP), core.ts (errors, need(), activity log, versions, counters)
 server/routes/ auth, catalog (products, categories, rates), sales (bills, customers, payments, cash-outs),
-               stock (stock in, adjust, losses), reports (dashboard, day book, GST, registers), admin (import, settings, backup, export, reset)
+               stock (stock in, adjust, losses), suppliers (purchase ledger), reports (dashboard, day book, GST, registers), admin (import, settings, backup, export, reset)
 server/scripts/ seed-demo.ts, move-to-postgres.ts
 web/src/       pages/ (one file per screen), components/ (ui, Layout, ProductForm, CustomerForm, BillDoc), state.tsx, i18n.ts
 ```
@@ -89,6 +89,11 @@ web/src/       pages/ (one file per screen), components/ (ui, Layout, ProductFor
 - **Bill numbers.** `nextCounter()` is one atomic `UPDATE … RETURNING` per series and financial year (`invoice:26-27`). It's safe under concurrent saves on both databases.
 - **Rate approvals (RATE-5/6, open question 6).** An Entry person's different rate is saved on the bill as typed, and a `rate_requests` row is created. **Approve** makes it official from that date. **Reject** lets the Owner give a rate. `correctBillRate()` then rewrites that bill's lines and totals and writes a ledger `correction` row for the difference. The version before the correction is kept.
 - **Prices include GST** by default (`settings.prices_include_gst`, stored per bill as `bills.gst_inclusive`). `computeBill(..., {inclusive})` takes the tax back out of the price; `correctBillRate` uses the bill's own flag. The older tests run with it off (`tests/helpers.ts`), the newer ones switch it on.
+- **A price typed on a bill line is "this bill only" by default** (`bill_lines.price_override = 1`, set by `oneOff: true` in the API). The item's own price is not touched, nothing goes for approval, and the line keeps the list price in `official_rate_paise`. A real rate change is still available (`oneOff` false: Owners apply it at once, an Entry person's goes to approval). An Entry person's own price puts the bill in the Owners' review list. `correctBillRate()` skips own-price lines.
+- **Whole-pack items** (bori, bag, tin, jar, pouch, bottle, pack) have `products.pack_kind`, base unit `pc`, never loose. The kg or litre size is only a label (`pack_size`); the base unit is named after the pack ("Bori 50 kg"). **One product per item × company × pack size**, each with its own price and stock, tied together by `family` ("Sooji") and `brand` (the company). Cartons are an ordinary larger unit ("Carton (12 × 1 L)"). Display helpers are in `shared/units.ts`.
+- **Stock summary** (`GET /api/reports/stock-summary?asOf=`): column groups = top-level category, a column per `family + pack size`, a row per `brand`. Only products with a pack kind or a family are listed. Past dates sum `stock_movements` up to that day.
+- **Purchase ledger.** `suppliers` and `supplier_ledger` (append-only; balance = Σ owed − Σ paid). A stock in with a named supplier writes a `purchase` row for the invoice amount; "paid now" parts become `cash_outs` (category `supplier`, so the day book and cash flow stay right) plus `payment` rows. A reversal is a second, negative cash-out plus a `reversal` row; wrong invoices are fixed with `correction` rows. Stock-in *imports* name suppliers but put nothing on the ledger (history counts as paid). Logic is in `server/lib/suppliers.ts`; routes in `server/routes/suppliers.ts`. Entry persons record deliveries and the invoice amount; only Owners/Admin pay, correct, reverse or see the Purchase tab (`supplier.*` permissions).
+- **Schema changes after the first release** are added by `addColumnIfMissing()` in `server/db/migrate.ts`, so databases made earlier upgrade on start. Old stock-in supplier names become supplier accounts on start (no dues).
 - **GST rounding.** CGST and SGST are each rounded per line, so they are always equal. The demo's walk-in receipt therefore shows ₹8.76 GST rather than ₹8.75. The total is still ₹184.
 
 ---
@@ -170,6 +175,21 @@ web/src/       pages/ (one file per screen), components/ (ui, Layout, ProductFor
 | PILOT-1..7 | ✅ | Nightly SQLite backups plus "Back up now" and "Download a copy". `move-to-postgres` checks the totals. Reset is Admin-only and needs the shop name typed. |
 | Hosting | ⬜ | Cloudflare Workers at `.workers.dev` (open question 12). See §5, item 3. |
 
+### Added after the first handoff
+
+| What | Status |
+| --- | --- |
+| One-off price on a bill line, without touching the item's price | ✅ |
+| Prices include GST (setting, per-bill basis) | ✅ |
+| Whole-pack items: bori, bag, tin…; family, pack size, cartons | ✅ (form, import, stock labels) |
+| Stock summary (stock on a day, companies × items) + Excel | ✅ |
+| Suppliers, purchase ledger, payments, reversals, corrections | ✅ |
+| Ledger Sales / Purchase tabs with filters (name, dues, overdue; dates, type, mode) | ✅ |
+| Dashboard "To pay suppliers" | ✅ |
+| Kruti Dev → Unicode conversion on import | ⬜ |
+| Supplier opening-dues import, purchase returns, input tax credit | ⬜ |
+| Print or share a supplier statement | ⬜ (Excel only) |
+
 ---
 
 ## 5. Suggested next steps, in order
@@ -216,6 +236,11 @@ Phone + OTP login, photos, voice search, physical count, monthly profit, restori
 
 ## 6. Known gaps and risks
 
+- **Kruti Dev text.** The shop's own stock sheet uses the old Kruti Dev font, which stores English keystrokes that only *look* like Hindi. Anything copied from it into Commercia (names, aliases) will be gibberish. Convert to Unicode first, or retype. Not handled by the importer.
+- **Stock summary layout is a reading of one photo.** The "26/28/30" bori column is modelled as bori in three sizes; the item name is unknown, so give those products a `family` when known. Rows are companies (brands); groups are top-level categories. Check against the real `.xlsx` when it arrives.
+- **Purchases carry no GST.** Per the shop, prices include GST and only amounts are tracked: no input tax credit, no supplier GSTIN, no purchase returns. A stock in cannot be cancelled; fix stock with an adjustment and the money with a correction.
+- **No import for supplier opening dues.** Type an opening balance on each supplier (Ledger → Suppliers → +).
+- **Old deliveries.** Stock-ins made before suppliers had accounts are linked to an account but put nothing on the ledger (treated as paid).
 - **Hindi is partial.** Menus, headings and main labels are translated (`web/src/i18n.ts`). Many smaller strings (banners, hints, empty states, toasts) fall back to English. To fix, wrap the remaining strings in `t()` and add entries.
 - **Stock can go negative.** The app allows it on purpose, because paper bills are typed in after the fact. There's no warning in the bill screen yet; consider a soft warning.
 - **Login screen lists users.** Like the demo, it shows every active user's name and role to anyone who opens it. That's fine on one laptop; reconsider once hosted on the internet (switch to the email field, which already appears automatically when there are more than 6 users).
@@ -252,6 +277,9 @@ Phone + OTP login, photos, voice search, physical count, monthly profit, restori
 ## 8. Testing notes
 
 - `tests/shared.test.ts` covers GST and totals (including the PRD's ₹931 example), rounding, kaccha / Bill of Supply / cash memo, discounts, the financial year, money parsing, unit conversion and the stock label, search (`fort mus 1`, `चीनी`, `chini`, `saffolla`), and the TOTP RFC test vector.
+- `tests/packs.test.ts`: whole-pack items, cartons, the stock summary on past days, import of pack columns.
+- `tests/suppliers.test.ts`: purchase on stock in, paid now, Entry-person limits, payments and reversals (also in the day book's cash flow), corrections, append-only triggers, opening balance, filters and running balances, reset.
+- `tests/migrate.test.ts`: existing databases gain the new columns; old supplier names get accounts.
 - `tests/api.test.ts` drives the real API:
   - credit sale and ledger (₹1,681), bags + kg on one bill, refusals for credit without a customer and for a tax invoice without a name;
   - concurrent numbering, role refusals being logged, the rate approval and rejection correction, rates on the bill's date;
@@ -259,5 +287,6 @@ Phone + OTP login, photos, voice search, physical count, monthly profit, restori
   - dashboard due equalling the dues list, day book and register totals, the GST summary;
   - losses (report → confirm → found), estimate → bill, deactivation logging the user out;
   - product import (preview, errors, all-or-nothing, re-import does nothing, undo) and dues import (duplicates, advances, details editable later).
+- Postgres: `npm run test:pg` runs all of this on Postgres. It also exposed that the Admin's reset crashed on Postgres (it tried a file backup first); fixed.
 - **No UI tests are committed.** The Playwright screenshots and flows were run from a scratch folder; consider adding `@playwright/test` with the flows described in §1.
 - To run against Postgres locally: `service postgresql start`, then `npm run test:pg`. Each test file creates its own database named `commercia_t_*`, and these aren't dropped automatically.

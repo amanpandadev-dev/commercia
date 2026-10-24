@@ -250,17 +250,6 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     .addColumn('base_milli', 'integer', notNull)
     .addColumn('price_override', 'integer', zero)
     .execute();
-  // Columns added after the first release: databases made earlier get them here.
-  const addColumnIfMissing = async (table: string, column: string, type: 'integer' | 'text', build: Col) => {
-    const t = (await db.introspection.getTables()).find((x) => x.name === table);
-    if (t && !t.columns.some((c) => c.name === column)) await db.schema.alterTable(table).addColumn(column, type, build).execute();
-  };
-  await addColumnIfMissing('bill_lines', 'price_override', 'integer', zero);
-  await addColumnIfMissing('bills', 'gst_inclusive', 'integer', zero);
-  await addColumnIfMissing('products', 'family', 'text', empty);
-  await addColumnIfMissing('products', 'pack_size', 'text', empty);
-  await addColumnIfMissing('products', 'pack_kind', 'text', empty);
-
   await idCol(db.schema.createTable('payments').ifNotExists())
     .addColumn('customer_id', 'integer')
     .addColumn('bill_id', 'integer')
@@ -306,6 +295,27 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     .addColumn('created_at', 'text', notNull)
     .execute();
 
+  await idCol(db.schema.createTable('suppliers').ifNotExists())
+    .addColumn('name', 'text', notNull)
+    .addColumn('phone', 'text', empty)
+    .addColumn('area', 'text', empty)
+    .addColumn('active', 'integer', (c) => c.notNull().defaultTo(1))
+    .addColumn('created_at', 'text', notNull)
+    .execute();
+
+  await idCol(db.schema.createTable('supplier_ledger').ifNotExists())
+    .addColumn('supplier_id', 'integer', notNull)
+    .addColumn('date', 'text', notNull)
+    .addColumn('kind', 'text', notNull)
+    .addColumn('ref_type', 'text')
+    .addColumn('ref_id', 'integer')
+    .addColumn('owed_paise', 'integer', zero)
+    .addColumn('paid_paise', 'integer', zero)
+    .addColumn('note', 'text', empty)
+    .addColumn('created_by', 'integer', notNull)
+    .addColumn('created_at', 'text', notNull)
+    .execute();
+
   await idCol(db.schema.createTable('activity').ifNotExists())
     .addColumn('user_id', 'integer')
     .addColumn('action', 'text', notNull)
@@ -334,6 +344,39 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     .addColumn('created_at', 'text', notNull)
     .execute();
 
+  // Columns added after the first release: databases made earlier get them here.
+  const addColumnIfMissing = async (table: string, column: string, type: 'integer' | 'text', build: Col) => {
+    const t = (await db.introspection.getTables()).find((x) => x.name === table);
+    if (t && !t.columns.some((c) => c.name === column)) await db.schema.alterTable(table).addColumn(column, type, build).execute();
+  };
+  await addColumnIfMissing('bill_lines', 'price_override', 'integer', zero);
+  await addColumnIfMissing('bills', 'gst_inclusive', 'integer', zero);
+  await addColumnIfMissing('products', 'family', 'text', empty);
+  await addColumnIfMissing('products', 'pack_size', 'text', empty);
+  await addColumnIfMissing('products', 'pack_kind', 'text', empty);
+  const nullable: Col = (c) => c;
+  await addColumnIfMissing('stock_ins', 'supplier_id', 'integer', nullable);
+  await addColumnIfMissing('stock_ins', 'invoice_no', 'text', empty);
+  await addColumnIfMissing('stock_ins', 'amount_paise', 'integer', zero);
+  await addColumnIfMissing('stock_ins', 'paid_paise', 'integer', zero);
+  await addColumnIfMissing('cash_outs', 'supplier_id', 'integer', nullable);
+  await addColumnIfMissing('cash_outs', 'stock_in_id', 'integer', nullable);
+  await addColumnIfMissing('cash_outs', 'reversal_of', 'integer', nullable);
+  await addColumnIfMissing('cash_outs', 'reversed', 'integer', zero);
+
+  // Deliveries typed before suppliers had accounts: give each name an account (no dues; they count as paid).
+  const known = new Map((await db.selectFrom('suppliers').select(['id', 'name']).execute()).map((r) => [r.name.trim().toLowerCase(), r.id]));
+  const unlinked = await db.selectFrom('stock_ins').select('supplier').distinct().where('supplier_id', 'is', null).where('supplier', '!=', '').where('supplier', '!=', 'Opening stock').execute();
+  for (const { supplier } of unlinked) {
+    const key = supplier.trim().toLowerCase();
+    let id = known.get(key);
+    if (!id) {
+      id = (await db.insertInto('suppliers').values({ name: supplier.trim(), phone: '', area: '', active: 1, created_at: new Date().toISOString() }).returning('id').executeTakeFirstOrThrow()).id;
+      known.set(key, id);
+    }
+    await db.updateTable('stock_ins').set({ supplier_id: id }).where('supplier', '=', supplier).where('supplier_id', 'is', null).execute();
+  }
+
   const indexes: [string, keyof DB, string[]][] = [
     ['idx_units_product', 'product_units', ['product_id']],
     ['idx_prices_unit', 'unit_prices', ['unit_id', 'list', 'from_date']],
@@ -346,6 +389,8 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     ['idx_parts_payment', 'payment_parts', ['payment_id']],
     ['idx_payments_date', 'payments', ['date']],
     ['idx_ledger_customer', 'ledger', ['customer_id']],
+    ['idx_supplier_ledger_supplier', 'supplier_ledger', ['supplier_id']],
+    ['idx_cash_outs_supplier', 'cash_outs', ['supplier_id']],
     ['idx_versions_entity', 'versions', ['entity', 'entity_id']],
     ['idx_activity_time', 'activity', ['created_at']],
   ];
@@ -355,7 +400,7 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
   await db.schema.createIndex('idx_bills_number').ifNotExists().unique().on('bills').column('number').execute();
 
   // History, activity log and ledger rows can't be changed or deleted by anyone (HIST-3, REP-5, LED-4).
-  const appendOnly = ['activity', 'versions', 'ledger', 'payment_parts'];
+  const appendOnly = ['activity', 'versions', 'ledger', 'payment_parts', 'supplier_ledger'];
   if (dialect === 'sqlite') {
     for (const t of appendOnly) {
       await sql

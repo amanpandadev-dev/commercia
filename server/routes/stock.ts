@@ -7,6 +7,7 @@ import { lastPurchasePerBase } from '../lib/catalog';
 import { istDate, isIsoDate } from '../../shared/dates';
 import { formatQty, formatRupees, roundHalfUp } from '../../shared/money';
 import { toBase } from '../../shared/units';
+import { findOrCreateSupplier, paySupplier, supplierEntry, type PayPart } from '../lib/suppliers';
 import type { User } from '../db/schema';
 
 export const stock = new Hono<AppEnv>();
@@ -29,13 +30,30 @@ async function unitOf(tx: Tx, productId: number, unitId: number) {
   return u;
 }
 
-/** Record a delivery (STK-1): all lines raise stock together, or nothing is saved. */
-export async function saveStockIn(
-  tx: Tx,
-  user: User,
-  body: { supplier: string; date: string; note: string; lines: z.infer<typeof lineSchema>[] },
-  importId: number | null = null,
-) {
+const payPartSchema = z.object({
+  mode: z.enum(['cash', 'upi', 'card', 'bank', 'cheque']),
+  amountPaise: z.number().int().positive(),
+  reference: z.string().default(''),
+});
+
+interface StockInBody {
+  supplier: string;
+  date: string;
+  note: string;
+  /** The supplier's own invoice number. */
+  invoiceNo?: string;
+  /** What the invoice comes to (prices include GST). Defaults to the lines' rates × quantities. */
+  amountPaise?: number | null;
+  /** Paid at the counter with the delivery; the rest of the invoice goes on credit. */
+  payments?: PayPart[];
+  lines: z.infer<typeof lineSchema>[];
+}
+
+/**
+ * Record a delivery (STK-1): all lines raise stock together, or nothing is saved. A named supplier
+ * gets an account: the invoice amount goes on what we owe them, and anything paid now comes off it.
+ */
+export async function saveStockIn(tx: Tx, user: User, body: StockInBody, importId: number | null = null) {
   if (!isIsoDate(body.date)) throw bad('Bad date');
   let total = 0;
   const resolved = [];
@@ -44,11 +62,29 @@ export async function saveStockIn(
     total += l.ratePaise ? roundHalfUp((l.qtyMilli * l.ratePaise) / 1000) : 0;
     resolved.push({ l, u });
   }
+  const amount = body.amountPaise ?? total;
+  const payments = body.payments ?? [];
+  const paid = payments.reduce((a, p) => a + p.amountPaise, 0);
+  if (paid > 0 && !body.supplier.trim()) throw bad('Name the supplier to record a payment');
+  if (paid > amount) throw bad('The amount paid is more than the invoice amount');
+  // Opening-stock rows are not a purchase from anyone.
+  const supplierId = body.supplier.trim() && !(importId && body.supplier === 'Opening stock') ? await findOrCreateSupplier(tx, body.supplier) : null;
   const si = await tx
     .insertInto('stock_ins')
-    .values({ supplier: body.supplier, date: body.date, note: body.note, total_paise: total, import_id: importId, created_by: user.id, created_at: nowIso() })
+    .values({
+      supplier: body.supplier, supplier_id: supplierId, invoice_no: body.invoiceNo?.trim() ?? '', amount_paise: amount, paid_paise: paid,
+      date: body.date, note: body.note, total_paise: total, import_id: importId, created_by: user.id, created_at: nowIso(),
+    })
     .returning('id')
     .executeTakeFirstOrThrow();
+  // Imported deliveries are history: they count as paid, so they put nothing on the purchase ledger.
+  if (supplierId && !importId && amount > 0) {
+    await supplierEntry(tx, user, {
+      supplierId, date: body.date, kind: 'purchase', refType: 'stock_in', refId: si.id, owed: amount,
+      note: ['Stock in', body.invoiceNo?.trim() && `invoice ${body.invoiceNo.trim()}`].filter(Boolean).join(' · '),
+    });
+    if (paid > 0) await paySupplier(tx, user, { supplierId, date: body.date, parts: payments, note: 'Paid with delivery', stockInId: si.id });
+  }
   for (const { l, u } of resolved) {
     await tx
       .insertInto('stock_movements')
@@ -75,7 +111,7 @@ export async function saveStockIn(
     'create',
     'stock_in',
     si.id,
-    `Stock in${body.supplier ? ` from ${body.supplier}` : ''}: ${resolved.map(({ l, u }) => `${formatQty(l.qtyMilli)} ${u.name} ${u.name_en}`).join(', ')}${total ? ` · ${formatRupees(total)}` : ''}`,
+    `Stock in${body.supplier ? ` from ${body.supplier}` : ''}: ${resolved.map(({ l, u }) => `${formatQty(l.qtyMilli)} ${u.name} ${u.name_en}`).join(', ')}${amount ? ` · ${formatRupees(amount)}${paid ? `, ${formatRupees(paid)} paid` : ''}` : ''}`,
   );
   return { id: si.id, total };
 }
@@ -83,8 +119,18 @@ export async function saveStockIn(
 stock.post('/stock-ins', async (c) => {
   const user = await need(c, 'stock.in');
   const body = z
-    .object({ supplier: z.string().trim().default(''), date: z.string(), note: z.string().default(''), lines: z.array(lineSchema).min(1, 'Add at least one item') })
+    .object({
+      supplier: z.string().trim().default(''),
+      date: z.string(),
+      note: z.string().default(''),
+      invoiceNo: z.string().trim().default(''),
+      amountPaise: z.number().int().nonnegative().nullable().optional(),
+      payments: z.array(payPartSchema).default([]),
+      lines: z.array(lineSchema).min(1, 'Add at least one item'),
+    })
     .parse(await c.req.json());
+  // Putting money out is for Owners; an Entry person records the delivery and the invoice amount.
+  if (body.payments.length) await need(c, 'supplier.pay');
   const res = await c.get('db').k.transaction().execute((tx) => saveStockIn(tx, user, body));
   return c.json(res);
 });
@@ -94,16 +140,17 @@ stock.get('/stock-ins', async (c) => {
   const rows = await k
     .selectFrom('stock_ins as s')
     .leftJoin('users as u', 'u.id', 's.created_by')
-    .select(['s.id', 's.supplier', 's.date', 's.total_paise', 's.note', 's.created_at', 'u.name as by'])
+    .select(['s.id', 's.supplier', 's.supplier_id', 's.invoice_no', 's.date', 's.total_paise', 's.amount_paise', 's.paid_paise', 's.note', 's.created_at', 'u.name as by'])
     .orderBy('s.id', 'desc')
     .limit(100)
     .execute();
   return c.json(rows);
 });
 
+/** Supplier names for the Stock in screen's suggestions. */
 stock.get('/suppliers', async (c) => {
-  const rows = await c.get('db').k.selectFrom('stock_ins').select('supplier').where('supplier', '!=', '').groupBy('supplier').orderBy('supplier').execute();
-  return c.json(rows.map((r) => r.supplier));
+  const rows = await c.get('db').k.selectFrom('suppliers').select('name').where('active', '=', 1).orderBy('name').execute();
+  return c.json(rows.map((r) => r.name));
 });
 
 /** A supplier's last delivery as a starting point (STK-5). */

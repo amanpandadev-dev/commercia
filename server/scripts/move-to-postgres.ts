@@ -10,6 +10,7 @@ import { openDb, type Db } from '../db/index';
 import { TABLES } from '../routes/admin';
 import { customerBalances, stockMap } from '../lib/catalog';
 import { toNum } from '../lib/core';
+import { supplierBalances } from '../lib/suppliers';
 
 const file = process.argv[2] ?? 'data/commercia.db';
 const url = process.env.DATABASE_URL;
@@ -53,6 +54,8 @@ await dst.k.transaction().execute(async (tx) => {
 async function totals(db: Db) {
   const stock = [...(await stockMap(db.k)).entries()].sort((a, b) => a[0] - b[0]);
   const dues = [...(await customerBalances(db.k)).entries()].sort((a, b) => a[0] - b[0]);
+  const payables = [...(await supplierBalances(db.k)).entries()].sort((a, b) => a[0] - b[0]);
+  const cashOut = await db.k.selectFrom('cash_outs').select((eb) => eb.fn.sum<number>('amount_paise').as('t')).executeTakeFirst();
   const sales = await db.k
     .selectFrom('bills')
     .select([(eb) => eb.fn.sum<number>('total_paise').as('t'), (eb) => eb.fn.countAll<number>().as('n')])
@@ -62,8 +65,10 @@ async function totals(db: Db) {
   return {
     stock: JSON.stringify(stock),
     dues: JSON.stringify(dues),
+    suppliers: JSON.stringify(payables),
     sales: `${toNum(sales?.t)} paise in ${toNum(sales?.n)} bills`,
     payments: `${toNum(pays?.t)} paise`,
+    cashOuts: `${toNum(cashOut?.t)} paise`,
   };
 }
 
@@ -73,7 +78,7 @@ let ok = true;
 for (const k of Object.keys(a) as (keyof typeof a)[]) {
   const same = a[k] === b[k];
   ok &&= same;
-  console.log(`${same ? '✓' : '✗'} ${k}: ${k === 'stock' || k === 'dues' ? (same ? 'identical' : 'DIFFERENT') : `${a[k]} → ${b[k]}`}`);
+  console.log(`${same ? '✓' : '✗'} ${k}: ${k === 'stock' || k === 'dues' || k === 'suppliers' ? (same ? 'identical' : 'DIFFERENT') : `${a[k]} → ${b[k]}`}`);
 }
 console.log(ok ? '\nAll totals match. Point the app at DATABASE_URL to go live.' : '\nTotals differ — do not go live; keep using the SQLite file.');
 process.exit(ok ? 0 : 2);

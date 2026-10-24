@@ -1,16 +1,39 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Wallet, Printer, Plus, Pencil, Search, Undo2, Share2 } from 'lucide-react';
 import { api, exportExcel } from '../api';
 import { useApp } from '../state';
-import { Avatar, Bi, CustomerSearch, Empty, Field, Modal, ReasonDialog, customerIndex, type CustomerRow } from '../components/ui';
+import { Avatar, Bi, CustomerSearch, Empty, Field, Modal, ReasonDialog, Seg, customerIndex, type CustomerRow } from '../components/ui';
+import { SupplierLedger } from './SupplierLedger';
 import { CustomerForm } from '../components/CustomerForm';
 import { VersionList } from './Inventory';
 import { rs, MODE_LABEL, MODES, type Mode } from '../format';
 import { parseRupees } from '../../../shared/money';
 import { addDays, formatDate, istDate, shortDate } from '../../../shared/dates';
 
+/** The ledger has two sides: customers who owe us (Sales), and suppliers we owe (Purchase). */
 export function Ledger() {
+  const { can, t } = useApp();
+  const loc = useLocation();
+  const nav = useNavigate();
+  const suppliers = loc.pathname.startsWith('/ledger/suppliers') && can('supplier.view');
+  return (
+    <>
+      {can('supplier.view') && (
+        <div className="row wrap" style={{ marginBottom: 12 }}>
+          <Seg
+            value={suppliers ? 'purchase' : 'sales'}
+            onChange={(v) => nav(v === 'purchase' ? '/ledger/suppliers' : '/ledger')}
+            options={[{ value: 'sales', label: `${t('Customers')} · Sales` }, { value: 'purchase', label: 'Suppliers · Purchase' }]}
+          />
+        </div>
+      )}
+      {suppliers ? <SupplierLedger /> : <CustomerLedger />}
+    </>
+  );
+}
+
+function CustomerLedger() {
   const { t } = useApp();
   const { id } = useParams();
   const [params, setParams] = useSearchParams();

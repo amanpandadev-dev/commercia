@@ -2,6 +2,7 @@
 const HI: Record<string, string> = {
   Dashboard: 'डैशबोर्ड',
   Products: 'सामान',
+  'To pay suppliers': 'सप्लायर को देना',
   'Stock summary': 'स्टॉक सार',
   'Stock as on': 'स्टॉक की तारीख़',
   'Prices include GST': 'दाम में GST शामिल',

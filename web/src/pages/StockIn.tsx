@@ -4,7 +4,7 @@ import { Check, Repeat, Trash2, Truck } from 'lucide-react';
 import { api } from '../api';
 import { useApp, type CProduct } from '../state';
 import { Bi, Empty, Field, ProductSearch } from '../components/ui';
-import { baseUnitOf, productStock, rs, unitShort, qty, reorderLabel } from '../format';
+import { baseUnitOf, productStock, rs, unitShort, qty, reorderLabel, MODE_LABEL, MODES, type Mode } from '../format';
 import { parseQty, parseRupees, roundHalfUp } from '../../../shared/money';
 import { istDate } from '../../../shared/dates';
 import { baseLabel } from '../../../shared/units';
@@ -21,9 +21,14 @@ let lineKey = 0;
 const DRAFT = 'commercia.draft.stockin';
 
 export function StockIn() {
-  const { products, t, lang, reloadCatalog, toast } = useApp();
+  const { products, t, lang, reloadCatalog, toast, can } = useApp();
   const [params] = useSearchParams();
   const [supplier, setSupplier] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [amount, setAmount] = useState(''); // the invoice amount, when it differs from the lines
+  const [paying, setPaying] = useState<Mode[]>([]);
+  const [paid, setPaid] = useState<Record<Mode, string>>({ cash: '', upi: '', card: '', bank: '', cheque: '' });
+  const [paidRef, setPaidRef] = useState<Record<Mode, string>>({ cash: '', upi: '', card: '', bank: '', cheque: '' });
   const [date, setDate] = useState(istDate());
   const [lines, setLines] = useState<Line[]>([]);
   const [suppliers, setSuppliers] = useState<string[]>([]);
@@ -81,6 +86,12 @@ export function StockIn() {
     return a + (q > 0 && r >= 0 ? roundHalfUp((q * r) / 1000) : 0);
   }, 0);
 
+  const typedAmount = amount.trim() ? parseRupees(amount) : null;
+  const invoiceAmount = typedAmount ?? total; // paise
+  const payParts = MODES.map((m) => ({ mode: m, amountPaise: paid[m].trim() ? parseRupees(paid[m]) : 0, reference: paidRef[m] })).filter((x) => x.amountPaise > 0);
+  const paidNow = payParts.reduce((a, x) => a + x.amountPaise, 0);
+  const onCredit = invoiceAmount - paidNow;
+
   const repeatLast = async () => {
     if (!supplier) return;
     const d = await api.get(`/api/stock-ins/last?supplier=${encodeURIComponent(supplier)}`);
@@ -98,10 +109,23 @@ export function StockIn() {
       if (r != null && Number.isNaN(r)) return setErr('Check the purchase rates');
       body.push({ productId: l.productId, unitId: l.unitId, qtyMilli: q, ratePaise: r });
     }
+    if (typedAmount != null && Number.isNaN(typedAmount)) return setErr('Check the invoice amount');
+    if (payParts.some((x) => Number.isNaN(x.amountPaise))) return setErr('Check the amounts paid');
+    if (paidNow > 0 && !supplier.trim()) return setErr('Name the supplier to record a payment');
+    if (paidNow > invoiceAmount) return setErr('The amount paid is more than the invoice amount');
     setBusy(true);
     try {
-      await api.post('/api/stock-ins', { supplier, date, lines: body });
-      toast(`Added to stock${supplier ? ` from ${supplier}` : ''}`);
+      await api.post('/api/stock-ins', {
+        supplier, date, invoiceNo, lines: body,
+        amountPaise: typedAmount != null ? typedAmount : total > 0 ? total : null,
+        payments: payParts.map((x) => ({ mode: x.mode, amountPaise: x.amountPaise, reference: x.reference })),
+      });
+      toast(`Added to stock${supplier ? ` from ${supplier}` : ''}${supplier && onCredit > 0 ? ` · ${rs(onCredit, false)} on credit` : ''}`);
+      setInvoiceNo('');
+      setAmount('');
+      setPaying([]);
+      setPaid({ cash: '', upi: '', card: '', bank: '', cheque: '' });
+      setPaidRef({ cash: '', upi: '', card: '', bank: '', cheque: '' });
       setLines([]);
       localStorage.removeItem(DRAFT);
       await reloadCatalog();
@@ -133,6 +157,7 @@ export function StockIn() {
               <datalist id="suppliers">{suppliers.map((s) => <option key={s} value={s} />)}</datalist>
             </Field>
             <Field label={t('Date')}><input className="input" type="date" value={date} max={istDate()} onChange={(e) => setDate(e.target.value)} /></Field>
+            <Field label="Supplier's invoice no."><input className="input" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="Optional" /></Field>
           </div>
           <ProductSearch onPick={add} showPrice={false} placeholder={lang === 'en' ? 'Add item… / सामान जोड़ें' : 'सामान जोड़ें…'} />
           {lines.length === 0 ? (
@@ -168,6 +193,38 @@ export function StockIn() {
               </table>
             </div>
           )}
+          {lines.length > 0 && (
+            <div className="card card-pad col" style={{ boxShadow: 'none', background: 'var(--surface-2, transparent)' }}>
+              <div className="grid grid-2">
+                <Field label="Invoice amount ₹" hint="Prices include GST. Leave empty to use the total above.">
+                  <input className="input num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={total ? (total / 100).toFixed(2) : 'Amount on the invoice'} />
+                </Field>
+                <div className="col gap-4">
+                  <span className="label-sm">{supplier.trim() ? 'On credit' : 'Supplier'}</span>
+                  <b className="num" style={{ fontSize: 20, color: supplier.trim() && onCredit > 0 ? 'var(--accent-text)' : undefined }}>
+                    {supplier.trim() ? rs(Math.max(0, onCredit), false) : '—'}
+                  </b>
+                  <span className="faint" style={{ fontSize: 12 }}>{supplier.trim() ? 'goes on what you owe this supplier' : 'Name the supplier to keep their account'}</span>
+                </div>
+              </div>
+              {can('supplier.pay') && supplier.trim() !== '' && (
+                <>
+                  <div className="row wrap gap-4">
+                    <span className="muted">Paid now:</span>
+                    {MODES.map((m) => (
+                      <button key={m} type="button" className={`chip ${paying.includes(m) ? 'on' : ''}`} onClick={() => setPaying(paying.includes(m) ? paying.filter((x) => x !== m) : [...paying, m])}>{MODE_LABEL[m]}</button>
+                    ))}
+                  </div>
+                  {paying.map((m) => (
+                    <div key={m} className="row">
+                      <Field label={`${MODE_LABEL[m]} ₹`}><input className="input num" inputMode="decimal" value={paid[m]} onChange={(e) => setPaid({ ...paid, [m]: e.target.value })} /></Field>
+                      {m !== 'cash' && <Field label={m === 'cheque' ? 'Cheque no.' : 'Reference'}><input className="input" value={paidRef[m]} onChange={(e) => setPaidRef({ ...paidRef, [m]: e.target.value })} /></Field>}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
           {err && <div className="err">{err}</div>}
           <button className="btn primary big" disabled={!lines.length || busy} onClick={save}>
             <Check size={18} /> {t('Add to stock')}
@@ -197,10 +254,10 @@ export function StockIn() {
             <div key={s.id} className="list-item" style={{ cursor: 'default' }}>
               <span className="tag ok">+</span>
               <div className="grow">
-                <div>{s.supplier || 'Delivery'}</div>
-                <div className="faint" style={{ fontSize: 12 }}>{s.by} · {s.date}</div>
+                <div>{s.supplier || 'Delivery'}{s.invoice_no && <span className="muted"> · {s.invoice_no}</span>}</div>
+                <div className="faint" style={{ fontSize: 12 }}>{s.by} · {s.date}{s.amount_paise > s.paid_paise && s.supplier_id ? ` · ${rs(s.amount_paise - s.paid_paise, false)} on credit` : ''}</div>
               </div>
-              <span className="num">{s.total_paise ? rs(s.total_paise, false) : ''}</span>
+              <span className="num">{s.amount_paise || s.total_paise ? rs(s.amount_paise || s.total_paise, false) : ''}</span>
             </div>
           ))}
         </div>

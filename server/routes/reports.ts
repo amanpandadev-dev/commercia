@@ -8,6 +8,8 @@ import { categoryPaths, customerBalances, lastPurchasePerBase, loadCatalog, stoc
 import { addDays, istDate, isIsoDate } from '../../shared/dates';
 import { roundHalfUp } from '../../shared/money';
 import { baseLabel, stockLabel } from '../../shared/units';
+import { can } from '../../shared/perms';
+import { supplierBalances } from '../lib/suppliers';
 
 export const reports = new Hono<AppEnv>();
 
@@ -57,6 +59,16 @@ reports.get('/dashboard', async (c) => {
   const today = istDate();
   const monthStart = `${today.slice(0, 8)}01`;
   const [todaySales, monthSales, collected] = await Promise.all([salesTotal(k, today, today), salesTotal(k, monthStart, today), collections(k, today, today)]);
+  // What the shop owes its suppliers is for Owners and the Admin only.
+  let payable: number | null = null;
+  let payableSuppliers = 0;
+  if (can(c.get('user').role, 'supplier.view')) {
+    payable = 0;
+    for (const b of (await supplierBalances(k)).values()) if (b > 0) {
+      payable += b;
+      payableSuppliers++;
+    }
+  }
   const balances = await customerBalances(k);
   let due = 0;
   let dueCustomers = 0;
@@ -116,6 +128,8 @@ reports.get('/dashboard', async (c) => {
     collected,
     due,
     dueCustomers,
+    payable,
+    payableSuppliers,
     low,
     days,
     recent: recent.map((r) => ({ ...r, modes: [...new Set(recentParts.filter((p) => p.bill_id === r.id).map((p) => p.mode))] })),

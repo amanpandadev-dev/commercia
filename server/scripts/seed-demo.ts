@@ -166,6 +166,19 @@ await amit.post('/api/bills', {
   payments: [{ mode: 'upi', amountPaise: 50000 }],
 });
 await amit.post('/api/stock-ins', { supplier: 'Gupta Traders', date: today, lines: [{ ...unit('Sugar', 'Bag 50 kg'), qtyMilli: 1000, ratePaise: 200000 }] });
+// The purchase side: what the shop owes its suppliers, some of it overdue.
+await owner.post('/api/stock-ins', {
+  supplier: 'Gupta Traders', date: addDays(today, -40), invoiceNo: 'GT-2291', amountPaise: 1800000,
+  payments: [{ mode: 'upi', amountPaise: 1000000, reference: 'UTR 440218' }],
+  lines: [{ ...unit('Sugar', 'Bag 50 kg'), qtyMilli: 9000, ratePaise: 200000 }],
+});
+await owner.post('/api/stock-ins', {
+  supplier: 'Annapurna Foods', date: addDays(today, -12), invoiceNo: 'AF-884',
+  lines: [{ ...unit('Sooji — Annapurna 25 kg'), qtyMilli: 20000, ratePaise: 105000 }, { ...unit('Maida — Annapurna 25 kg'), qtyMilli: 10000, ratePaise: 88000 }],
+});
+await owner.post('/api/suppliers', { name: 'Shakti Bhog Traders', phone: '9839011223', area: 'Aminabad', openingPaise: 4250000, asOf: addDays(today, -70) });
+const supplierList = await owner.get('/api/supplier-ledger');
+await owner.post(`/api/suppliers/${supplierList.find((x: any) => x.name === 'Shakti Bhog Traders').id}/payments`, { date: addDays(today, -20), parts: [{ mode: 'cash', amountPaise: 1000000 }], note: 'Part payment' });
 await owner.post('/api/payments', { customerId: cid('Rakesh Verma'), date: today, parts: [{ mode: 'cash', amountPaise: 70000 }, { mode: 'upi', amountPaise: 30000 }] });
 // One rate change by the Entry person, waiting for approval.
 await amit.post('/api/bills', { kind: 'receipt', customerId: cid('Pooja Gupta'), billDate: today, lines: [{ ...unit('Mustard Oil'), qtyMilli: 1000, ratePaise: 16500 }], payments: [] });

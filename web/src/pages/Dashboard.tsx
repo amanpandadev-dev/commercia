@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ReceiptText, Wallet, NotebookText, TriangleAlert, PackagePlus, Plus, ClipboardCheck, Tags } from 'lucide-react';
+import { ReceiptText, Wallet, NotebookText, TriangleAlert, PackagePlus, Plus, ClipboardCheck, Tags, Truck } from 'lucide-react';
 import { api } from '../api';
 import { useApp } from '../state';
 import { Bi, Empty } from '../components/ui';
@@ -15,6 +15,8 @@ interface Dash {
   collected: Record<string, number>;
   due: number;
   dueCustomers: number;
+  payable: number | null;
+  payableSuppliers: number;
   low: { id: number; nameEn: string; nameHi: string; stockMilli: number; reorderMilli: number; reorderUnitId: number | null; baseUnit: 'kg' | 'L' | 'pc'; packKind: string; units: { id: number; name: string; factorMilli: number; isBase: boolean }[] }[];
   days: { date: string; total: number }[];
   recent: { id: number; number: string; customer_name: string; total_paise: number; credit_paise: number; paid_paise: number; status: string; bill_date: string; created_at: string; modes: string[] }[];
@@ -58,7 +60,7 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-4">
+      <div className="grid grid-auto">
         <div className="card stat">
           <div className="label"><span className="ic"><ReceiptText size={17} /></span><Bi en="Today's Sales" /></div>
           <div className="value num">{rs(d.todaySales.total, false)}</div>
@@ -76,6 +78,13 @@ export function Dashboard() {
           <div className="value num">{rs(d.due, false)}</div>
           <div className="sub">{d.dueCustomers} customers</div>
         </div>
+        {d.payable != null && (
+          <div className="card stat" role="button" style={{ cursor: 'pointer' }} onClick={() => nav('/ledger/suppliers')}>
+            <div className="label"><span className="ic"><Truck size={17} /></span><Bi en="To pay suppliers" /></div>
+            <div className="value num">{rs(d.payable, false)}</div>
+            <div className="sub">{d.payableSuppliers} supplier{d.payableSuppliers === 1 ? '' : 's'}</div>
+          </div>
+        )}
         <div className={`card stat ${d.low.length ? 'danger' : ''}`} role="button" style={{ cursor: 'pointer' }} onClick={() => nav('/inventory?filter=low')}>
           <div className="label"><span className="ic"><TriangleAlert size={17} /></span><Bi en="Low Stock" /></div>
           <div className="value">{d.low.length} items</div>
