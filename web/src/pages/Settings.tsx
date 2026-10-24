@@ -84,6 +84,10 @@ export function SettingsPage() {
 
         <div className="card card-pad col">
           <div className="label-sm" style={{ color: 'var(--accent-text)' }}>{t('GST scheme').toUpperCase()}</div>
+          <div className="row between">
+            <span>{t('Prices include GST')}<span className="faint" style={{ display: 'block', fontSize: 12 }}>{s.prices_include_gst === '0' ? 'Bills add GST on top of the price.' : 'Shelf prices (MRP) already contain GST; the bill takes the tax back out.'}</span></span>
+            <Seg value={s.prices_include_gst ?? '1'} onChange={(v) => edit && save({ prices_include_gst: v })} options={[{ value: '1', label: 'Yes' }, { value: '0', label: 'No' }]} />
+          </div>
           <div className="col gap-4">
             {schemes.map((p) => (
               <div key={p.from} className="row"><span className="tag neutral">{p.from === '2000-01-01' ? 'From the start' : `From ${p.from}`}</span> {p.scheme === 'regular' ? 'Regular GST' : p.scheme === 'composition' ? 'Composition scheme' : 'Not registered'}</div>

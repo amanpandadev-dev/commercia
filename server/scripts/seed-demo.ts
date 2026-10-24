@@ -119,6 +119,7 @@ for (let d = 6; d >= 1; d--) {
         const p = cat.products.find((x: any) => x.id === l.productId);
         return { qtyMilli: l.qtyMilli, ratePaise: p.units.find((u: any) => u.id === l.unitId).retail, gstBp: p.gstBp };
       }),
+      { inclusive: true },
     ).total;
     await owner.post('/api/bills', { kind: 'receipt', billDate: date, lines, payments: [{ mode: rnd() > 0.45 ? 'cash' : 'upi', amountPaise: total }] });
   }
@@ -131,7 +132,7 @@ await owner.post('/api/stock/adjust', { ...unit('Salt'), qtyMilli: -28000, reaso
 
 // Today, as in the video.
 const today = istDate();
-await amit.post('/api/bills', { kind: 'receipt', billDate: today, lines: [{ ...unit('Sugar'), qtyMilli: 1000 }, { ...unit('Tea 250g'), qtyMilli: 1000 }], payments: [{ mode: 'cash', amountPaise: 18400 }] });
+await amit.post('/api/bills', { kind: 'receipt', billDate: today, lines: [{ ...unit('Sugar'), qtyMilli: 1000 }, { ...unit('Tea 250g'), qtyMilli: 1000 }], payments: [{ mode: 'cash', amountPaise: 17500 }] }); // ₹45 + ₹130, GST included
 await amit.post('/api/bills', {
   kind: 'tax_invoice', customerId: cid('Sunita Devi'), billDate: today,
   lines: [{ ...unit('Sugar'), qtyMilli: 4000 }, { ...unit('Mustard Oil'), qtyMilli: 2000 }, { ...unit('Toor Dal (loose)'), qtyMilli: 2000 }, { ...unit('Bath Soap'), qtyMilli: 3000 }],

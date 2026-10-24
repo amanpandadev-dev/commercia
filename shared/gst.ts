@@ -43,14 +43,18 @@ export interface Discount {
 }
 
 /**
- * Prices are before tax. GST is worked out per line at the product's rate and split
- * equally into CGST and SGST; the bill total is rounded to the nearest rupee and the
- * round-off is shown. A bill-level discount is applied before tax, spread across
- * lines in proportion to their amounts (BILL-3, BILL-10).
+ * GST is worked out per line at the product's rate and split equally into CGST and
+ * SGST; the bill total is rounded to the nearest rupee and the round-off is shown.
+ * A bill-level discount is spread across lines in proportion to their amounts
+ * (BILL-3, BILL-10).
+ *
+ * Prices are before tax by default. With `inclusive`, the typed price already contains
+ * the GST (the usual MRP): the line amount is what the customer pays and the tax is
+ * taken back out of it, so the total never moves from qty × price.
  */
 export function computeBill(
   lines: LineInput[],
-  opts: { scheme?: GstScheme; kind?: BillKind; discount?: Discount | null } = {},
+  opts: { scheme?: GstScheme; kind?: BillKind; discount?: Discount | null; inclusive?: boolean } = {},
 ): BillTotals {
   const scheme = opts.scheme ?? 'regular';
   const kind = opts.kind ?? 'receipt';
@@ -86,10 +90,12 @@ export function computeBill(
   }
 
   const results: LineResult[] = lines.map((l, i) => {
-    const taxable = amounts[i] - lineDiscounts[i];
+    const net = amounts[i] - lineDiscounts[i];
     const gstBp = chargesGst ? l.gstBp : 0;
-    const half = roundHalfUp((taxable * gstBp) / 20000);
-    const inclusiveRate = roundHalfUp((l.ratePaise * (10000 + gstBp)) / 10000);
+    // Inclusive: tax is a share of what was paid, and CGST = SGST exactly. Otherwise it is added on top.
+    const half = opts.inclusive ? roundHalfUp((net * gstBp) / (2 * (10000 + gstBp))) : roundHalfUp((net * gstBp) / 20000);
+    const taxable = opts.inclusive ? net - 2 * half : net;
+    const inclusiveRate = opts.inclusive ? l.ratePaise : roundHalfUp((l.ratePaise * (10000 + gstBp)) / 10000);
     return { amount: amounts[i], discount: lineDiscounts[i], taxable, cgst: half, sgst: half, gstBp, inclusiveRate };
   });
 

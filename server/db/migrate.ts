@@ -212,6 +212,7 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     .addColumn('sgst_paise', 'integer', zero)
     .addColumn('round_off_paise', 'integer', zero)
     .addColumn('total_paise', 'integer', zero)
+    .addColumn('gst_inclusive', 'integer', zero)
     .addColumn('paid_paise', 'integer', zero)
     .addColumn('credit_paise', 'integer', zero)
     .addColumn('rate_pending', 'integer', zero)
@@ -250,6 +251,10 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
   const billLines = (await db.introspection.getTables()).find((t) => t.name === 'bill_lines');
   if (billLines && !billLines.columns.some((c) => c.name === 'price_override')) {
     await db.schema.alterTable('bill_lines').addColumn('price_override', 'integer', zero).execute();
+  }
+  const billsTable = (await db.introspection.getTables()).find((t) => t.name === 'bills');
+  if (billsTable && !billsTable.columns.some((c) => c.name === 'gst_inclusive')) {
+    await db.schema.alterTable('bills').addColumn('gst_inclusive', 'integer', zero).execute();
   }
 
   await idCol(db.schema.createTable('payments').ifNotExists())

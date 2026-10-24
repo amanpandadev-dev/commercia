@@ -6,6 +6,34 @@ import { SearchIndex } from '../shared/search';
 import { totpCode, verifyTotp, base32Decode, base32Encode } from '../server/lib/crypto';
 
 describe('GST and totals', () => {
+  it('takes GST back out of an inclusive price, and the total stays qty × price', () => {
+    const t = computeBill([{ qtyMilli: 1000, ratePaise: 10500, gstBp: 500 }], { inclusive: true });
+    expect(t.taxable).toBe(10000);
+    expect(t.cgst).toBe(250);
+    expect(t.sgst).toBe(250);
+    expect(t.total).toBe(10500);
+    expect(t.lines[0].inclusiveRate).toBe(10500);
+    // 0% items and unregistered shops: the price is the price.
+    expect(computeBill([{ qtyMilli: 2000, ratePaise: 14000, gstBp: 0 }], { inclusive: true }).taxable).toBe(28000);
+    const memo = computeBill([{ qtyMilli: 1000, ratePaise: 10500, gstBp: 500 }], { inclusive: true, scheme: 'unregistered' });
+    expect(memo.total).toBe(10500);
+    expect(memo.cgst + memo.sgst).toBe(0);
+  });
+
+  it('keeps CGST equal to SGST and the line whole when an inclusive price does not split evenly', () => {
+    const t = computeBill([{ qtyMilli: 3000, ratePaise: 3333, gstBp: 500 }], { inclusive: true });
+    const l = t.lines[0];
+    expect(l.cgst).toBe(l.sgst);
+    expect(l.taxable + l.cgst + l.sgst).toBe(9999);
+  });
+
+  it('spreads a discount over inclusive lines before taking the tax out', () => {
+    const t = computeBill([{ qtyMilli: 1000, ratePaise: 10500, gstBp: 500 }, { qtyMilli: 1000, ratePaise: 10000, gstBp: 0 }], { inclusive: true, discount: { type: 'amount', value: 2050 } });
+    expect(t.discount).toBe(2050);
+    expect(t.total).toBe(18500); // 205.00 - 20.50 = 184.50, rounded to the rupee
+    expect(t.taxable + t.cgst + t.sgst + t.roundOff).toBe(18500);
+  });
+
   it('matches the PRD worked example (BILL-3)', () => {
     const t = computeBill([
       { qtyMilli: 4000, ratePaise: 4500, gstBp: 500 }, // 4 kg sugar

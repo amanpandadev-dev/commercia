@@ -157,9 +157,10 @@ export async function createBill(tx: Tx, user: User, input: BillInput, opts: { f
   }
   const oneOffCount = resolved.filter((r) => r.oneOff).length;
 
+  const inclusive = settings.prices_include_gst === '1';
   const totals = computeBill(
     resolved.map((r) => ({ qtyMilli: r.l.qtyMilli, ratePaise: r.rate, gstBp: r.gstBp })),
-    { scheme, kind: input.kind, discount: input.discount ?? null },
+    { scheme, kind: input.kind, discount: input.discount ?? null, inclusive },
   );
 
   const paid = input.estimate ? 0 : input.payments.reduce((a, p) => a + p.amountPaise, 0);
@@ -195,6 +196,7 @@ export async function createBill(tx: Tx, user: User, input: BillInput, opts: { f
       sgst_paise: totals.sgst,
       round_off_paise: totals.roundOff,
       total_paise: totals.total,
+      gst_inclusive: inclusive ? 1 : 0,
       paid_paise: paid,
       credit_paise: credit,
       rate_pending: 0,
@@ -376,7 +378,7 @@ export async function correctBillRate(tx: Tx, user: User, billId: number, unitId
   const discount = bill.discount_paise > 0 ? { type: 'amount' as const, value: bill.discount_paise } : null;
   const totals = computeBill(
     nextLines.map((l) => ({ qtyMilli: l.qty_milli, ratePaise: l.rate_paise, gstBp: l.gst_bp })),
-    { scheme, kind: bill.kind, discount },
+    { scheme, kind: bill.kind, discount, inclusive: bill.gst_inclusive === 1 },
   );
   await saveVersion(tx, 'bill', billId, { lines, total: bill.total_paise }, `Before correction: ${reason}`, user.id);
   for (let i = 0; i < nextLines.length; i++) {

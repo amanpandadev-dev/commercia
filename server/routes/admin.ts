@@ -139,6 +139,7 @@ admin.patch('/settings', async (c) => {
       prefix_invoice: z.string().min(1).max(8).optional(),
       prefix_estimate: z.string().min(1).max(8).optional(),
       composition_pct: z.string().optional(),
+      prices_include_gst: z.enum(['0', '1']).optional(),
       require_2fa: z.enum(['0', '1']).optional(),
       backup_dir: z.string().optional(),
       default_lang: z.enum(['en', 'hi']).optional(),

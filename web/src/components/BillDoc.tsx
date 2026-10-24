@@ -46,7 +46,9 @@ export function BillDoc({ d, paper }: { d: BillDetail; paper: 'A4' | 'thermal' }
   const showTax = kind === 'tax_invoice' || kind === 'receipt';
   const inclusive = kind === 'kaccha' || kind === 'estimate';
   const title = isEstimate ? 'ESTIMATE — NOT A BILL' : (PRINT_AS_LABEL[kind] ?? 'Bill').toUpperCase();
-  const lineRate = (l: any) => (inclusive ? Math.round((l.rate_paise * (10000 + l.gst_bp)) / 10000) : l.rate_paise);
+  // Bills saved with prices that already contain GST print the rate as typed; older ones add the tax for kaccha slips.
+  const priced = b.gst_inclusive === 1;
+  const lineRate = (l: any) => (inclusive && !priced ? Math.round((l.rate_paise * (10000 + l.gst_bp)) / 10000) : l.rate_paise);
   const lineAmt = (l: any) => (inclusive ? l.taxable_paise + l.cgst_paise + l.sgst_paise : l.amount_paise);
   const parts = d.payments.filter((p) => p.at_billing && !p.reversal_of).flatMap((p) => p.parts);
   const bySlab = new Map<number, { taxable: number; cgst: number; sgst: number }>();
@@ -127,7 +129,7 @@ export function BillDoc({ d, paper }: { d: BillDetail; paper: 'A4' | 'thermal' }
       <table>
         <thead>
           <tr>
-            <th>#</th><th>Item</th>{showTax && <th>HSN</th>}<th className="r">Qty</th><th className="r">Rate</th>{showTax && <th className="r">GST</th>}<th className="r">Amount</th>
+            <th>#</th><th>Item</th>{showTax && <th>HSN</th>}<th className="r">Qty</th><th className="r">Rate{priced && showTax ? " (incl. GST)" : ""}</th>{showTax && <th className="r">GST</th>}<th className="r">Amount</th>
           </tr>
         </thead>
         <tbody>

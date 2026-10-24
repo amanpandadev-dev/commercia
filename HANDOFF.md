@@ -88,6 +88,7 @@ web/src/       pages/ (one file per screen), components/ (ui, Layout, ProductFor
 - **History.** Changes to products, customers, bills and losses call `saveVersion()`. Anything that changes data should also call `logActivity()`.
 - **Bill numbers.** `nextCounter()` is one atomic `UPDATE … RETURNING` per series and financial year (`invoice:26-27`). It's safe under concurrent saves on both databases.
 - **Rate approvals (RATE-5/6, open question 6).** An Entry person's different rate is saved on the bill as typed, and a `rate_requests` row is created. **Approve** makes it official from that date. **Reject** lets the Owner give a rate. `correctBillRate()` then rewrites that bill's lines and totals and writes a ledger `correction` row for the difference. The version before the correction is kept.
+- **Prices include GST** by default (`settings.prices_include_gst`, stored per bill as `bills.gst_inclusive`). `computeBill(..., {inclusive})` takes the tax back out of the price; `correctBillRate` uses the bill's own flag. The older tests run with it off (`tests/helpers.ts`), the newer ones switch it on.
 - **GST rounding.** CGST and SGST are each rounded per line, so they are always equal. The demo's walk-in receipt therefore shows ₹8.76 GST rather than ₹8.75. The total is still ₹184.
 
 ---

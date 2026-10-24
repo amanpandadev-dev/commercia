@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS = {
   prefix_estimate: 'EST',
   gst_schemes: JSON.stringify([{ from: '2000-01-01', scheme: 'regular' }] satisfies SchemePeriod[]),
   composition_pct: '1',
+  prices_include_gst: '1', // MRPs and shelf prices already contain GST; bills take the tax back out
   require_2fa: '1',
   edit_window_min: '60', // Q7: about an hour
   backup_dir: '',

@@ -204,6 +204,8 @@ export interface BillsTable {
   sgst_paise: number;
   round_off_paise: number;
   total_paise: number;
+  /** 1 = the line rates on this bill contain GST (see settings.prices_include_gst when it was saved). */
+  gst_inclusive: Generated<number>;
   paid_paise: number;
   credit_paise: number;
   rate_pending: number;

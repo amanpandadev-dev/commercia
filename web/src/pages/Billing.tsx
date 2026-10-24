@@ -142,8 +142,8 @@ export function Billing() {
       .filter((x) => x.p)
       .map(({ l, p }) => ({ qtyMilli: Math.max(0, parseQty(l.qty) || 0), ratePaise: Math.max(0, parseRupees(l.rate) || 0), gstBp: p!.gstBp }));
     const d = discount.trim() ? (discountType === 'amount' ? { type: 'amount' as const, value: parseRupees(discount) || 0 } : { type: 'percent' as const, value: Math.round((parseFloat(discount) || 0) * 100) }) : null;
-    return computeBill(valid, { scheme, kind: kind === 'estimate' ? 'receipt' : kind, discount: d });
-  }, [lines, prod, scheme, kind, discount, discountType]);
+    return computeBill(valid, { scheme, kind: kind === 'estimate' ? 'receipt' : kind, discount: d, inclusive: settings?.prices_include_gst !== '0' });
+  }, [lines, prod, scheme, kind, discount, discountType, settings?.prices_include_gst]);
 
   const paidParts = parts.map((p, i) => ({ ...p, paise: p.amount.trim() ? parseRupees(p.amount) || 0 : parts.length === 1 && i === 0 ? totals.total : 0 }));
   const paid = kind === 'estimate' ? 0 : paidParts.reduce((a, p) => a + p.paise, 0);

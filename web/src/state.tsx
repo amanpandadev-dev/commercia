@@ -66,6 +66,7 @@ export interface Settings {
   prefix_invoice: string;
   prefix_estimate: string;
   gst_schemes: string;
+  prices_include_gst: string;
   composition_pct: string;
   require_2fa: string;
   edit_window_min: string;

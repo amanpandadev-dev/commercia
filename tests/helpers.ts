@@ -34,6 +34,8 @@ export async function setup() {
   const app = createApp(db);
   await setSetting(db.k, 'require_2fa', '0');
   await setSetting(db.k, 'shop_name', 'Sharma Kirana Store');
+  // The older tests were written for prices before tax; tests of inclusive prices switch this on.
+  await setSetting(db.k, 'prices_include_gst', '0');
   const mk = async (name: string, email: string, role: 'admin' | 'owner' | 'entry') =>
     db.k
       .insertInto('users')

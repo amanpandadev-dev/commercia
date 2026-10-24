@@ -1,7 +1,8 @@
-import { describe, expect, it, beforeAll } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { setup, seedCatalog, type Client } from './helpers';
 import { istDate, addDays } from '../shared/dates';
 import { sql } from 'kysely';
+import { setSetting } from '../server/lib/settings';
 
 const today = istDate();
 
@@ -317,6 +318,52 @@ describe('Commercia API', () => {
     expect((await temp.req('GET', '/api/account/me')).status).toBe(200);
     await owner.patch(`/api/users/${extra.id}`, { active: false });
     expect((await temp.req('GET', '/api/account/me')).status).toBe(401);
+  });
+
+  describe('prices that include GST', () => {
+    beforeAll(() => setSetting(ctx.db.k, 'prices_include_gst', '1'));
+    afterAll(() => setSetting(ctx.db.k, 'prices_include_gst', '0'));
+
+    it('charges exactly qty × price and splits the tax out of it', async () => {
+      const bill = await owner.post('/api/bills', {
+        kind: 'tax_invoice', customerId: sunita.id, billDate: today,
+        lines: [{ productId: items.oil.id, unitId: items.oil.L, qtyMilli: 1000, ratePaise: 10500, oneOff: true }],
+        payments: [],
+      });
+      expect(bill.total).toBe(10500);
+      const d = await owner.get(`/api/bills/${bill.id}`);
+      expect(d.bill.gst_inclusive).toBe(1);
+      expect(d.bill.taxable_paise).toBe(10000);
+      expect(d.bill.cgst_paise).toBe(250);
+      expect(d.bill.sgst_paise).toBe(250);
+      expect(d.lines[0].rate_paise).toBe(10500);
+    });
+
+    it("corrects a rejected rate with the bill's own pricing basis", async () => {
+      const bill = await entry.post('/api/bills', {
+        kind: 'receipt', customerId: sunita.id, billDate: today,
+        lines: [{ productId: items.oil.id, unitId: items.oil.L, qtyMilli: 1000, ratePaise: 17000 }],
+        payments: [],
+      });
+      const before = (await owner.get(`/api/customers/${sunita.id}/ledger`)).balance;
+      const req = (await owner.get('/api/rates/requests')).find((r: any) => r.bill_id === bill.id);
+      await owner.post('/api/rates/requests/decide', { decisions: [{ id: req.id, approve: false, finalPaise: 16500 }] });
+      const d = await owner.get(`/api/bills/${bill.id}`);
+      expect(d.bill.total_paise).toBe(16500);
+      expect((await owner.get(`/api/customers/${sunita.id}/ledger`)).balance).toBe(before - 500);
+    });
+
+    it('leaves bills saved before the setting changed on their own basis', async () => {
+      await setSetting(ctx.db.k, 'prices_include_gst', '0');
+      const bill = await owner.post('/api/bills', {
+        kind: 'receipt', customerId: sunita.id, billDate: today,
+        lines: [{ productId: items.dal.id, unitId: items.dal.kg, qtyMilli: 1000, ratePaise: 14000 }],
+        payments: [],
+      });
+      const d = await owner.get(`/api/bills/${bill.id}`);
+      expect(d.bill.gst_inclusive).toBe(0);
+      await setSetting(ctx.db.k, 'prices_include_gst', '1');
+    });
   });
 });
 
