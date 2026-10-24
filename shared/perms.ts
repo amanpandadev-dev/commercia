@@ -9,6 +9,7 @@ export const PERMISSIONS = {
   'catalog.edit': ['admin', 'owner'],
   'price.set': ['admin', 'owner'],
   'gst.edit': ['admin', 'owner'],
+  'stock.view': ['admin', 'owner', 'entry'],
   'stock.in': ['admin', 'owner', 'entry'],
   'stock.adjust': ['admin', 'owner'],
   'loss.record': ['admin', 'owner'],

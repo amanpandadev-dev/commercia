@@ -4,9 +4,10 @@ import { z } from 'zod';
 import ExcelJS from 'exceljs';
 import type { AppEnv, Tx } from '../lib/core';
 import { bad, need, toNum } from '../lib/core';
-import { categoryPaths, customerBalances, lastPurchasePerBase, loadCatalog } from '../lib/catalog';
+import { categoryPaths, customerBalances, lastPurchasePerBase, loadCatalog, stockMap } from '../lib/catalog';
 import { addDays, istDate, isIsoDate } from '../../shared/dates';
 import { roundHalfUp } from '../../shared/money';
+import { baseLabel, stockLabel } from '../../shared/units';
 
 export const reports = new Hono<AppEnv>();
 
@@ -66,7 +67,7 @@ reports.get('/dashboard', async (c) => {
   const catalog = await loadCatalog(k, today);
   const low = catalog
     .filter((p) => p.low)
-    .map((p) => ({ id: p.id, nameEn: p.nameEn, nameHi: p.nameHi, stockMilli: p.stockMilli, reorderMilli: p.reorderMilli, baseUnit: p.baseUnit, units: p.units, reorderUnitId: p.reorderUnitId }));
+    .map((p) => ({ id: p.id, nameEn: p.nameEn, nameHi: p.nameHi, stockMilli: p.stockMilli, reorderMilli: p.reorderMilli, baseUnit: p.baseUnit, packKind: p.packKind, units: p.units, reorderUnitId: p.reorderUnitId }));
   const week = await k
     .selectFrom('bills')
     .select(['bill_date', (eb) => eb.fn.sum<number>('total_paise').as('total')])
@@ -492,6 +493,63 @@ reports.get('/reports/stock-value', async (c) => {
     groups.set(key, g);
   }
   return c.json([...groups.values()].sort((a, b) => b.selling - a.selling));
+});
+
+/**
+ * Stock on one day, laid out like the shop's own sheet: column groups are the top-level
+ * categories (Bori, Bag, Ghee, Refined…), each with a column per item and pack size, and
+ * one row per company. Only items with a pack type or an item family are listed (the rest are
+ * ordinary loose or packed goods, found in the product list). Past dates are worked out from the
+ * stock movements up to that day.
+ */
+reports.get('/reports/stock-summary', async (c) => {
+  await need(c, 'stock.view');
+  const today = istDate();
+  const asOfQ = c.req.query('asOf');
+  const asOf = asOfQ && isIsoDate(asOfQ) ? asOfQ : today;
+  if (asOf > today) throw bad('Pick today or an earlier date');
+  const { k } = c.get('db');
+  const catalog = await loadCatalog(k, asOf);
+  const stock = await stockMap(k, undefined, asOf);
+
+  const colLabel = (p: (typeof catalog)[number]) => [p.family || p.nameEn, p.packSize].filter(Boolean).join(' ');
+  type Cell = { qtyMilli: number; label: string; n: number };
+  const cells = new Map<string, Cell>(); // group|column|row
+  const cols = new Map<string, Map<string, string>>(); // group → column key → label
+  const rowNames = new Set<string>();
+  for (const p of catalog) {
+    if (!p.packKind && !p.family) continue;
+    const group = p.categoryPath[0] ?? 'Other';
+    const label = colLabel(p);
+    const colKey = label.toLowerCase();
+    const row = p.brand.trim() || '—';
+    rowNames.add(row);
+    if (!cols.has(group)) cols.set(group, new Map());
+    cols.get(group)!.set(colKey, label);
+    const key = `${group}\u0000${colKey}\u0000${row}`;
+    const qty = stock.get(p.id) ?? 0;
+    const prev = cells.get(key);
+    const total = (prev?.qtyMilli ?? 0) + qty;
+    // One item in the cell shows its pack breakdown (3 cartons + 5 packs); several are simply added up.
+    const label2 = prev ? baseLabel(p.baseUnit, total, p.packKind) : stockLabel(qty, p.baseUnit, p.units, p.packKind);
+    cells.set(key, { qtyMilli: total, label: label2, n: (prev?.n ?? 0) + 1 });
+  }
+  const natural = (a: string, b: string) => a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' });
+  const groups = [...cols.entries()]
+    .sort(([a], [b]) => (a === 'Other' ? 1 : b === 'Other' ? -1 : natural(a, b)))
+    .map(([name, m]) => ({ name, columns: [...m.entries()].sort((a, b) => natural(a[1], b[1])).map(([key, label]) => ({ key, label })) }));
+  const rows = [...rowNames].sort((a, b) => (a === '—' ? 1 : b === '—' ? -1 : natural(a, b))).map((brand) => ({
+    brand,
+    cells: Object.fromEntries(
+      groups.flatMap((g) =>
+        g.columns.flatMap((col) => {
+          const cell = cells.get(`${g.name}\u0000${col.key}\u0000${brand}`);
+          return cell ? [[`${g.name}\u0000${col.key}`, { qtyMilli: cell.qtyMilli, label: cell.label }]] : [];
+        }),
+      ),
+    ),
+  }));
+  return c.json({ asOf, groups, rows });
 });
 
 /** Losses by month and reason (LOSS-5). */

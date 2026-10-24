@@ -57,6 +57,12 @@ export interface ProductsTable {
   step_milli: number;
   reorder_milli: number | null; // in base milli; null = switched off
   reorder_unit_id: number | null; // unit it was entered in, for display
+  /** The item a pack size belongs to (Sooji, Refined Oil): lines packs of different brands up in the stock summary. */
+  family: Generated<string>;
+  /** Label only: '25 kg', '1 L'. */
+  pack_size: Generated<string>;
+  /** '' for ordinary items; bori | bag | tin | jar | pouch | bottle | pack for whole-pack items. */
+  pack_kind: Generated<string>;
   aliases: string;
   buy_unit_id: number | null;
   sell_unit_id: number | null;

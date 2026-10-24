@@ -75,7 +75,34 @@ const products = [
   { category: 'Snacks', name: 'Parle-G 250g', nameHi: 'पारले जी', brand: 'Parle', baseUnit: 'pc', units: 'Box of 24 = 24', price: '25', gst: '18', hsn: '1905', reorder: '24', opening: '120', cost: '21', aliases: 'biscuit' },
   { category: 'Snacks', name: 'Maggi 70g', nameHi: 'मैगी', brand: 'Nestle', baseUnit: 'pc', units: 'Box of 48 = 48', price: '14', gst: '18', hsn: '1902', reorder: '24', opening: '144', cost: '12', aliases: 'noodles' },
 ];
-await owner.post('/api/import/commit', { kind: 'products', rows: products, fileName: 'demo-products.xlsx' });
+// Items sold only whole, one product per company and pack size (bori, bag, tin, pouch): the stock summary lines them up.
+const pack = (category: string, family: string, brand: string, packKind: string, packSize: string, price: string, opening: string, extra: Record<string, string> = {}) => ({
+  category, name: `${family} — ${brand} ${packSize}`, family, brand, packKind, packSize, price, gst: '0', opening, cost: String(Math.round(Number(price) * 0.93)), ...extra,
+});
+const wholePacks = [
+  pack('Bori', 'Sugar', 'Dhampur', 'bori', '50 kg', '2150', '6', { aliases: 'chini bori' }),
+  pack('Bori', 'Sugar', 'Balrampur', 'bori', '50 kg', '2180', '4'),
+  pack('Bori', 'Maida', 'Annapurna', 'bori', '50 kg', '1900', '3'),
+  pack('Bori', 'Atta', 'Shakti Bhog', 'bori', '50 kg', '2050', '5'),
+  pack('Bori', 'Sooji', 'Annapurna', 'bori', '50 kg', '2250', '2'),
+  pack('Bori', 'Sooji', 'Annapurna', 'bori', '30 kg', '1350', '3'),
+  pack('Bag', 'Sooji', 'Annapurna', 'bag', '25 kg', '1150', '8', { gst: '5' }),
+  pack('Bag', 'Sooji', 'Shakti Bhog', 'bag', '25 kg', '1180', '6', { gst: '5' }),
+  pack('Bag', 'Maida', 'Annapurna', 'bag', '25 kg', '960', '5', { gst: '5' }),
+  pack('Bag', 'Besan', 'Rajdhani', 'bag', '25 kg', '2400', '3', { gst: '5' }),
+  pack('Bag', 'Daliya', 'Shakti Bhog', 'bag', '25 kg', '1100', '4', { gst: '5' }),
+  pack('Ghee', 'Ghee', 'Amul', 'pouch', '1 L', '620', '30', { gst: '5', units: 'Carton (12 × 1 L) = 12', unitPrices: 'Carton (12 × 1 L) = 7300' }),
+  pack('Ghee', 'Ghee', 'Amul', 'pouch', '500 ml', '320', '24', { gst: '5' }),
+  pack('Ghee', 'Ghee', 'Madhusudan', 'pouch', '1 L', '600', '18', { gst: '5' }),
+  pack('Ghee', 'Ghee', 'Amul', 'tin', '15 L', '9100', '2', { gst: '5' }),
+  pack('Desi Ghee', 'Desi Ghee', 'Patanjali', 'jar', '1 L', '640', '14', { gst: '5' }),
+  pack('Desi Ghee', 'Desi Ghee', 'Patanjali', 'jar', '500 ml', '330', '10', { gst: '5' }),
+  pack('Refined', 'Refined Oil', 'Fortune', 'pouch', '1 L', '150', '40', { gst: '5', units: 'Carton (12 × 1 L) = 12', unitPrices: 'Carton (12 × 1 L) = 1740' }),
+  pack('Refined', 'Refined Oil', 'Fortune', 'jar', '5 L', '740', '8', { gst: '5' }),
+  pack('Refined', 'Refined Oil', 'Dhara', 'pouch', '1 L', '148', '28', { gst: '5' }),
+  pack('Refined', 'Refined Oil', 'Dhara', 'jar', '5 L', '735', '6', { gst: '5' }),
+];
+await owner.post('/api/import/commit', { kind: 'products', rows: [...products, ...wholePacks], fileName: 'demo-products.xlsx' });
 
 const customers = [
   ['Rakesh Verma', '4320', '9839001234', 'Aminabad'],

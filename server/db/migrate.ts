@@ -74,6 +74,9 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     .addColumn('step_milli', 'integer', (c) => c.notNull().defaultTo(1000))
     .addColumn('reorder_milli', 'integer')
     .addColumn('reorder_unit_id', 'integer')
+    .addColumn('family', 'text', empty)
+    .addColumn('pack_size', 'text', empty)
+    .addColumn('pack_kind', 'text', empty)
     .addColumn('aliases', 'text', empty)
     .addColumn('buy_unit_id', 'integer')
     .addColumn('sell_unit_id', 'integer')
@@ -247,15 +250,16 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     .addColumn('base_milli', 'integer', notNull)
     .addColumn('price_override', 'integer', zero)
     .execute();
-  // Databases made before one-off bill prices existed.
-  const billLines = (await db.introspection.getTables()).find((t) => t.name === 'bill_lines');
-  if (billLines && !billLines.columns.some((c) => c.name === 'price_override')) {
-    await db.schema.alterTable('bill_lines').addColumn('price_override', 'integer', zero).execute();
-  }
-  const billsTable = (await db.introspection.getTables()).find((t) => t.name === 'bills');
-  if (billsTable && !billsTable.columns.some((c) => c.name === 'gst_inclusive')) {
-    await db.schema.alterTable('bills').addColumn('gst_inclusive', 'integer', zero).execute();
-  }
+  // Columns added after the first release: databases made earlier get them here.
+  const addColumnIfMissing = async (table: string, column: string, type: 'integer' | 'text', build: Col) => {
+    const t = (await db.introspection.getTables()).find((x) => x.name === table);
+    if (t && !t.columns.some((c) => c.name === column)) await db.schema.alterTable(table).addColumn(column, type, build).execute();
+  };
+  await addColumnIfMissing('bill_lines', 'price_override', 'integer', zero);
+  await addColumnIfMissing('bills', 'gst_inclusive', 'integer', zero);
+  await addColumnIfMissing('products', 'family', 'text', empty);
+  await addColumnIfMissing('products', 'pack_size', 'text', empty);
+  await addColumnIfMissing('products', 'pack_kind', 'text', empty);
 
   await idCol(db.schema.createTable('payments').ifNotExists())
     .addColumn('customer_id', 'integer')

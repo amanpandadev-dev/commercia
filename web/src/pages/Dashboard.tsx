@@ -15,7 +15,7 @@ interface Dash {
   collected: Record<string, number>;
   due: number;
   dueCustomers: number;
-  low: { id: number; nameEn: string; nameHi: string; stockMilli: number; reorderMilli: number; reorderUnitId: number | null; baseUnit: 'kg' | 'L' | 'pc'; units: { id: number; name: string; factorMilli: number; isBase: boolean }[] }[];
+  low: { id: number; nameEn: string; nameHi: string; stockMilli: number; reorderMilli: number; reorderUnitId: number | null; baseUnit: 'kg' | 'L' | 'pc'; packKind: string; units: { id: number; name: string; factorMilli: number; isBase: boolean }[] }[];
   days: { date: string; total: number }[];
   recent: { id: number; number: string; customer_name: string; total_paise: number; credit_paise: number; paid_paise: number; status: string; bill_date: string; created_at: string; modes: string[] }[];
   pendingRates: number;
@@ -131,7 +131,7 @@ export function Dashboard() {
                 <b style={{ fontWeight: 500 }}>{lang === 'hi' && l.nameHi ? l.nameHi : l.nameEn}</b>
                 <div className="hi">{lang === 'hi' ? l.nameEn : l.nameHi}</div>
               </div>
-              <span className="err num" style={{ fontWeight: 600, fontSize: 14 }}>{stockLabel(l.stockMilli, l.baseUnit, l.units)}</span>
+              <span className="err num" style={{ fontWeight: 600, fontSize: 14 }}>{stockLabel(l.stockMilli, l.baseUnit, l.units, l.packKind)}</span>
               <span className="muted hide-sm" style={{ width: 150, fontSize: 12 }}>reorder at {reorderLabel(l as unknown as CProduct)}</span>
               <div className="meter hide-sm" style={{ width: 90 }}><i style={{ width: `${Math.min(100, Math.max(5, (l.stockMilli / l.reorderMilli) * 100))}%` }} /></div>
             </div>

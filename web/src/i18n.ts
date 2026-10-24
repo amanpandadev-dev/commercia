@@ -1,6 +1,10 @@
 // English is the key; Hindi is looked up. Anything missing shows in English.
 const HI: Record<string, string> = {
   Dashboard: 'डैशबोर्ड',
+  Products: 'सामान',
+  'Stock summary': 'स्टॉक सार',
+  'Stock as on': 'स्टॉक की तारीख़',
+  'Prices include GST': 'दाम में GST शामिल',
   Inventory: 'इन्वेंटरी',
   'Stock In': 'माल आवक',
   Billing: 'बिलिंग',

@@ -150,7 +150,7 @@ export function StockIn() {
                     const u = p.units.find((x) => x.id === l.unitId)!;
                     return (
                       <tr key={l.key} onClick={() => setFocus(p.id)}>
-                        <td className="name"><b>{lang === 'hi' && p.nameHi ? p.nameHi : p.nameEn}</b>{q > 0 && u && <span className="faint" style={{ fontSize: 12 }}>= {baseLabel(p.baseUnit, Math.round((q * u.factorMilli) / 1000))}</span>}</td>
+                        <td className="name"><b>{lang === 'hi' && p.nameHi ? p.nameHi : p.nameEn}</b>{q > 0 && u && <span className="faint" style={{ fontSize: 12 }}>= {baseLabel(p.baseUnit, Math.round((q * u.factorMilli) / 1000), p.packKind)}</span>}</td>
                         <td style={{ width: 90 }}><input data-qty={l.key} className="input sm num" inputMode="decimal" value={l.qty} onChange={(e) => upd(l.key, { qty: e.target.value })} /></td>
                         <td style={{ width: 130 }}>
                           <select className="input sm" value={l.unitId} onChange={(e) => upd(l.key, { unitId: Number(e.target.value) })}>
