@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ReceiptText, Wallet, NotebookText, TriangleAlert, PackagePlus, Plus, ClipboardCheck, Tags, Truck } from 'lucide-react';
+import { ReceiptText, Wallet, NotebookText, TriangleAlert, PackagePlus, Plus, ClipboardCheck, Tags, Truck, KeyRound } from 'lucide-react';
 import { api } from '../api';
 import { useApp } from '../state';
 import { Bi, Empty } from '../components/ui';
@@ -15,6 +15,7 @@ interface Dash {
   collected: Record<string, number>;
   due: number;
   dueCustomers: number;
+  passwordRequests: number;
   payable: number | null;
   payableSuppliers: number;
   low: { id: number; nameEn: string; nameHi: string; stockMilli: number; reorderMilli: number; reorderUnitId: number | null; baseUnit: 'kg' | 'L' | 'pc'; packKind: string; units: { id: number; name: string; factorMilli: number; isBase: boolean }[] }[];
@@ -45,6 +46,13 @@ export function Dashboard() {
 
   return (
     <>
+      {d.passwordRequests > 0 && (
+        <div className="banner row wrap">
+          <Link to="/users" className="row" style={{ color: 'inherit' }}>
+            <KeyRound size={16} /> <b>{d.passwordRequests}</b> password reset request{d.passwordRequests > 1 ? 's' : ''} waiting
+          </Link>
+        </div>
+      )}
       {can('rates.approve') && (d.pendingRates > 0 || d.reviewCount > 0) && (
         <div className="banner row wrap">
           {d.pendingRates > 0 && (

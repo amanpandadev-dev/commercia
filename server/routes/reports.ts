@@ -10,6 +10,7 @@ import { roundHalfUp } from '../../shared/money';
 import { baseLabel, stockLabel } from '../../shared/units';
 import { can } from '../../shared/perms';
 import { supplierBalances } from '../lib/suppliers';
+import { pendingRequests } from '../lib/passwordReset';
 
 export const reports = new Hono<AppEnv>();
 
@@ -59,6 +60,7 @@ reports.get('/dashboard', async (c) => {
   const today = istDate();
   const monthStart = `${today.slice(0, 8)}01`;
   const [todaySales, monthSales, collected] = await Promise.all([salesTotal(k, today, today), salesTotal(k, monthStart, today), collections(k, today, today)]);
+  const passwordRequests = can(c.get('user').role, 'users.manage') ? (await pendingRequests(k, c.get('user'))).length : 0;
   // What the shop owes its suppliers is for Owners and the Admin only.
   let payable: number | null = null;
   let payableSuppliers = 0;
@@ -130,6 +132,7 @@ reports.get('/dashboard', async (c) => {
     dueCustomers,
     payable,
     payableSuppliers,
+    passwordRequests,
     low,
     days,
     recent: recent.map((r) => ({ ...r, modes: [...new Set(recentParts.filter((p) => p.bill_id === r.id).map((p) => p.mode))] })),

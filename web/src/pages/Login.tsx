@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Lock, WifiOff, ShieldCheck } from 'lucide-react';
+import { Lock, WifiOff, ShieldCheck, KeyRound, ArrowLeft } from 'lucide-react';
 import { api } from '../api';
 import { translate, type Lang } from '../i18n';
 import { storedLang } from '../state';
@@ -25,6 +25,8 @@ function Logo() {
 
 export function AuthScreen({ state, onDone }: { state: AuthState; onDone: () => void }) {
   const [lang, setLang] = useState<Lang>(storedLang() ?? state.defaultLang ?? 'en');
+  const [forgot, setForgot] = useState<{ userId: number | null; email: string } | null>(null);
+  const [notice, setNotice] = useState('');
   const t = (s: string) => translate(lang, s);
   const changeLang = (l: Lang) => {
     setLang(l);
@@ -54,8 +56,10 @@ export function AuthScreen({ state, onDone }: { state: AuthState; onDone: () => 
           <Totp t={t} onDone={onDone} />
         ) : state.step === 'enroll' ? (
           <Enroll onDone={onDone} />
+        ) : forgot ? (
+          <Forgot state={state} t={t} lang={lang} start={forgot} onBack={() => setForgot(null)} onChanged={() => { setForgot(null); setNotice('Password changed. Log in with the new one.'); }} />
         ) : (
-          <Login state={state} t={t} lang={lang} onDone={onDone} />
+          <Login state={state} t={t} lang={lang} onDone={onDone} notice={notice} onForgot={(who) => { setNotice(''); setForgot(who); }} />
         )}
         <div className="row mt-16 faint" style={{ fontSize: 12 }}>
           <WifiOff size={14} /> {t('Works without internet · data stays on this PC')}
@@ -65,7 +69,7 @@ export function AuthScreen({ state, onDone }: { state: AuthState; onDone: () => 
   );
 }
 
-function Login({ state, t, lang, onDone }: { state: AuthState; t: (s: string) => string; lang: Lang; onDone: () => void }) {
+function Login({ state, t, lang, onDone, notice, onForgot }: { state: AuthState; t: (s: string) => string; lang: Lang; onDone: () => void; notice: string; onForgot: (who: { userId: number | null; email: string }) => void }) {
   const [userId, setUserId] = useState<number | null>(state.users.length === 1 ? state.users[0].id : null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -118,11 +122,117 @@ function Login({ state, t, lang, onDone }: { state: AuthState; t: (s: string) =>
           <input id="pw" className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" autoFocus={!!userId} />
         </div>
       </div>
+      {notice && <div className="banner ok">{t(notice)}</div>}
       {err && <div className="err">{err}</div>}
       <button className="btn primary big" disabled={busy || (!many && !userId) || !password}>
         {t('Log in')}
       </button>
+      <button type="button" className="btn ghost" onClick={() => onForgot({ userId, email })}>
+        <KeyRound size={15} /> {t('Forgot password?')}
+      </button>
     </form>
+  );
+}
+
+/** "Forgot password?": ask for a code (emailed, or given by the Owner), then type it with a new password. */
+function Forgot({ state, t, lang, start, onBack, onChanged }: { state: AuthState; t: (s: string) => string; lang: Lang; start: { userId: number | null; email: string }; onBack: () => void; onChanged: () => void }) {
+  const many = state.users.length > 6;
+  const [userId, setUserId] = useState<number | null>(start.userId ?? (state.users.length === 1 ? state.users[0].id : null));
+  const [email, setEmail] = useState(start.email);
+  const [via, setVia] = useState<'email' | 'owner' | null>(null);
+  const [haveCode, setHaveCode] = useState(false);
+  const [code, setCode] = useState('');
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const who = many ? { email } : { userId };
+  const stage = via || haveCode ? 'code' : 'ask';
+
+  const ask = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr('');
+    setBusy(true);
+    try {
+      const r = await api.post('/api/auth/forgot', who);
+      setVia(r.via);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const reset = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr('');
+    if (pw.length < 8) return setErr('The password must be at least 8 characters');
+    if (pw !== pw2) return setErr('The two passwords are not the same');
+    setBusy(true);
+    try {
+      await api.post('/api/auth/reset', { ...who, code, password: pw });
+      onChanged();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="col gap-16">
+      <button type="button" className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={onBack}><ArrowLeft size={14} /> {t('Back to login')}</button>
+      <h2 style={{ fontSize: 22 }}>{t('Forgot password?')}</h2>
+      {stage === 'ask' ? (
+        <form onSubmit={ask} className="col gap-16">
+          {many ? (
+            <div className="field"><label>Email</label><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus /></div>
+          ) : (
+            <div className="field">
+              <label>{t('Who forgot their password?')}</label>
+              <div className="user-tiles">
+                {state.users.map((u) => (
+                  <button type="button" key={u.id} className={`user-tile ${userId === u.id ? 'on' : ''}`} onClick={() => setUserId(u.id)}>
+                    <Avatar name={u.name} lg />
+                    <div><b style={{ fontWeight: 600 }}>{u.name}</b><div className="hi">{ROLE_LABEL[u.role][lang]}</div></div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {err && <div className="err">{err}</div>}
+          <button className="btn primary big" disabled={busy || (many ? !email.trim() : !userId)}>{t('Get a reset code')}</button>
+          <button type="button" className="btn ghost" onClick={() => setHaveCode(true)}>{t('I already have a code')}</button>
+        </form>
+      ) : (
+        <form onSubmit={reset} className="col gap-16">
+          {via === 'email' && <div className="banner info"><div>If this address is registered, a code has been emailed to it. It works for 30 minutes. Not arrived? Ask the Owner for one.</div></div>}
+          {via === 'owner' && <div className="banner info"><div>Ask the shop Owner for a reset code. They will see your request under <b>Users</b> and on their Dashboard, and read a code out to you. If you are the Admin, run <code>npm run reset-password -- your@email</code> on the shop computer.</div></div>}
+          {haveCode && !via && many && <div className="field"><label>Email</label><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>}
+          {haveCode && !via && !many && (
+            <div className="field">
+              <label>{t('Who forgot their password?')}</label>
+              <div className="user-tiles">
+                {state.users.map((u) => (
+                  <button type="button" key={u.id} className={`user-tile ${userId === u.id ? 'on' : ''}`} onClick={() => setUserId(u.id)}>
+                    <Avatar name={u.name} lg />
+                    <div><b style={{ fontWeight: 600 }}>{u.name}</b><div className="hi">{ROLE_LABEL[u.role][lang]}</div></div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="field">
+            <label>{t('Reset code')}</label>
+            <input className="input" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX" autoComplete="one-time-code" autoFocus style={{ letterSpacing: 3, fontSize: 18 }} maxLength={12} />
+          </div>
+          <div className="field"><label>{t('New password')} (8+ characters)</label><input className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" /></div>
+          <div className="field"><label>{t('Type it again')}</label><input className="input" type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" /></div>
+          {err && <div className="err">{err}</div>}
+          <button className="btn primary big" disabled={busy || !code.trim() || !pw || (haveCode && !via && (many ? !email.trim() : !userId))}>{t('Set new password')}</button>
+          <div className="faint" style={{ fontSize: 12 }}>You will be signed out everywhere. If you use an authenticator app, you still need its code to log in.</div>
+        </form>
+      )}
+    </div>
   );
 }
 

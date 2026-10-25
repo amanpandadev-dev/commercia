@@ -48,6 +48,16 @@ If Windows asks about the firewall, allow **Private networks** so phones on the 
 | Old khata | **Import → Customer dues**: only *Name* and *Amount owed* are required. A negative amount means the customer has paid in advance. |
 | Wipe test data | **Settings → Before go-live** (Admin only; you type the shop name to confirm). Users and settings stay, and a backup is taken first. |
 
+### Forgot your password?
+
+On the login page tap **Forgot password?**, choose your name, and **Get a reset code**.
+
+- **Without email** (the default at the shop): the Owner or Admin sees your request on their Dashboard and under **Users**, checks it is really you, taps **Make a reset code** and reads the 8-character code out to you. You type it with a new password. A code works once, for an hour, and allows five wrong tries.
+- **With email**: set `SMTP_URL` (for example `smtps://user:password@smtp.example.com:465`) and `MAIL_FROM` before starting, and the code is emailed to the address on the account instead (it works for 30 minutes). If sending fails, the request goes to the Owner as above.
+- **The Admin** can't be reset by anyone else in the app. Without email, run this on the shop computer: `npm run reset-password -- ramesh@shop.in` (prints a new password; add `--reset-2fa` if the authenticator phone is lost).
+
+Setting a new password signs that person out everywhere. It does not switch off their authenticator-app code.
+
 ### Restore a backup (ADM-3, PILOT-5)
 
 1. Stop the app (close the terminal window running `npm start`).
@@ -74,12 +84,12 @@ The server checks permissions on every request, not just the screens (AUTH-3, PI
 | Bills, stock in, payments, customers | ✓ | ✓ | ✓ |
 | Change a rate | applies at once | applies at once | sent for approval |
 | Cancel bills, reverse payments, adjust stock, record losses | ✓ | ✓ | report a shortage only |
-| Add a new product (with its first price, and a category if needed), singly or from a products spreadsheet | ✓ | ✓ | ✓ |
-| Edit products, prices, GST, categories, settings; change existing items from a spreadsheet; import customer dues | ✓ | ✓ | — |
+| Add a new product (with its first price, and a category if needed), singly or from a products spreadsheet; undo your own latest import | ✓ | ✓ | ✓ |
+| Edit products, prices, GST, categories, settings; change existing items from a spreadsheet; import customer dues; undo someone else's import | ✓ | ✓ | — |
 | Reports, review, activity log, approvals | ✓ | ✓ | day book only |
 | Stock summary | ✓ | ✓ | ✓ |
 | Suppliers: purchase ledger, pay, reverse, correct | ✓ | ✓ | — (records a delivery and its invoice amount) |
-| Users | ✓ | ✓ (not Admins) | — |
+| Users, and reset codes for people who forgot their password | ✓ | ✓ (not Admins) | — |
 | Reset test data | ✓ | — | — |
 
 Owners and the Admin confirm each login with an authenticator-app code (AUTH-2). They set it up at their first login, from a QR code. The Admin can switch this off in **Settings → Security**; the demo seed switches it off.
@@ -106,7 +116,7 @@ Owners and the Admin confirm each login with an authenticator-app code (AUTH-2).
 
 Release 1 **Must** items, all built:
 
-- **Access:** login, roles, user management (AUTH-1..4).
+- **Access:** login, roles, user management, forgot password (AUTH-1..4).
 - **Catalogue:** category tree, products, packs, loose and packed items, aliases (CAT-1..5).
 - **Units and bags:** UNIT-1..5.
 - **Search:** SRCH-1..6 and SRCH-8.
@@ -126,7 +136,6 @@ Release 1 **Must** items, all built:
 
 | Item | Note |
 | --- | --- |
-| Password reset by email (part of AUTH-1) | Needs an email service; the pilot is offline. The Admin or an Owner resets passwords in **Users**. |
 | Entry-person edit window (AUTH-6, open question 7) | Owners correct entries by cancelling and re-entering. Next step: allow edits to one's own bill for the window in Settings (default 60 min). |
 | Category merge, category chips on New Bill, voice search, photos | CAT-6 (merge part), SRCH-7, SRCH-9, CAT-8 |
 | Physical count mode, theft attachments | STK-6, LOSS-4 |

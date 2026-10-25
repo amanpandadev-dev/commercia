@@ -38,7 +38,7 @@ const STATUS: Record<Row['status'], { label: string; cls: string }> = {
 
 /** Spreadsheet import (IMP-1..8, MIG-1..5). The uploaded file is read and thrown away; only the confirmed rows are saved. */
 export function ImportPage() {
-  const { can, toast, reloadCatalog } = useApp();
+  const { can, toast, reloadCatalog, me } = useApp();
   const kinds = (['products', 'stock', 'customers'] as Kind[]).filter((k) => can(k === 'products' ? 'import.products' : k === 'stock' ? 'import.stock' : 'import.customers'));
   const [kind, setKind] = useState<Kind>(kinds[0] ?? 'stock');
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -197,7 +197,7 @@ export function ImportPage() {
               <b style={{ fontWeight: 500, textTransform: 'capitalize' }}>{h.kind}</b> <span className="muted">· {h.file_name || 'sheet'} · {h.summary}</span>
               <div className="faint" style={{ fontSize: 12 }}>{h.by} · {dateTimeOf(h.created_at)}</div>
             </div>
-            {h.undone ? <span className="tag neutral">Undone</span> : i === 0 && can('import.undo') ? (
+            {h.undone ? <span className="tag neutral">Undone</span> : i === 0 && (can('import.undo') || (can('import.undo.own') && h.created_by === me?.id)) ? (
               <button className="btn sm" onClick={async () => { if (!confirm('Undo this import? Sales made since stay recorded.')) return; try { await api.post(`/api/imports/${h.id}/undo`); toast('Import undone'); reloadCatalog(); loadHistory(); } catch (e) { toast((e as Error).message, 'error'); } }}>
                 <Undo2 size={14} /> Undo
               </button>

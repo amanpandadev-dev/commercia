@@ -29,6 +29,7 @@ export const PERMISSIONS = {
   'import.stock': ['admin', 'owner', 'entry'],
   'import.customers': ['admin', 'owner'],
   'import.undo': ['admin', 'owner'],
+  'import.undo.own': ['admin', 'owner', 'entry'], // undo an import you made yourself
   'reports.view': ['admin', 'owner'],
   'daybook.view': ['admin', 'owner', 'entry'],
   'rates.approve': ['admin', 'owner'],

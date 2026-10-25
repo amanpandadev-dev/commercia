@@ -7,6 +7,7 @@ import { HttpError, bad, logActivity, need } from '../lib/core';
 import { hashPassword, newTotpSecret, randomToken, sha256, verifyPassword, verifyTotp } from '../lib/crypto';
 import { nowIso } from '../db/index';
 import { getSettings, setSetting } from '../lib/settings';
+import { askForReset, issueCode, pendingRequests, redeem, tellPasswordChanged } from '../lib/passwordReset';
 import type { User } from '../db/schema';
 import type { Role } from '../../shared/perms';
 
@@ -167,6 +168,37 @@ auth.post('/login', async (c) => {
   return c.json({ step });
 });
 
+// ---- Forgot password: no login needed for these two ----
+const whoSchema = z.object({ userId: z.number().optional(), email: z.string().optional() });
+const findPerson = async (c: Parameters<MiddlewareHandler<AppEnv>>[0], who: z.infer<typeof whoSchema>) => {
+  let q = c.get('db').k.selectFrom('users').selectAll().where('active', '=', 1);
+  if (who.userId) q = q.where('id', '=', who.userId);
+  else if (who.email?.trim()) q = q.where('email', '=', who.email.trim().toLowerCase());
+  else throw bad('Choose who forgot their password');
+  return q.executeTakeFirst();
+};
+
+/** "Forgot password?": emails a code when email is set up, otherwise leaves a request for an Owner. The answer is the same for any name. */
+auth.post('/forgot', async (c) => {
+  const who = whoSchema.parse(await c.req.json());
+  const { k } = c.get('db');
+  const user = await findPerson(c, who);
+  const via = await askForReset(k, user, (await getSettings(k)).shop_name);
+  await logActivity(k, user?.id ?? null, 'password_forgot', 'user', user?.id ?? null, user ? `${user.name} asked to reset their password (${via})` : `Password reset asked for someone who is not a user (${who.email ?? who.userId})`);
+  return c.json({ ok: true, via });
+});
+
+/** The code plus a new password. A wrong code, an old one and an unknown person all get the same answer. */
+auth.post('/reset', async (c) => {
+  const body = whoSchema.extend({ code: z.string().min(1), password: passwordSchema }).parse(await c.req.json());
+  const { k } = c.get('db');
+  const user = await findPerson(c, body);
+  const ok = user ? await k.transaction().execute((tx) => redeem(tx, user, body.code, body.password)) : false;
+  if (!user || !ok) throw new HttpError(400, 'That code did not work or has expired. Ask for a new one.', 'bad_code');
+  await tellPasswordChanged(user, (await getSettings(k)).shop_name);
+  return c.json({ ok: true });
+});
+
 async function partialSession(c: Parameters<MiddlewareHandler<AppEnv>>[0]) {
   const loaded = await loadSession(c);
   if (!loaded) throw new HttpError(401, 'Please log in', 'unauthenticated');
@@ -255,6 +287,23 @@ users.get('/', async (c) => {
 
 const roleSchema = z.enum(['admin', 'owner', 'entry']);
 
+/** People who tapped "Forgot password?" and are waiting for an Owner. */
+users.get('/password-requests', async (c) => {
+  const actor = await need(c, 'users.manage');
+  return c.json(await pendingRequests(c.get('db').k, actor));
+});
+
+users.post('/password-requests/:id/dismiss', async (c) => {
+  const actor = await need(c, 'users.manage');
+  const id = Number(c.req.param('id'));
+  const { k } = c.get('db');
+  const req = (await pendingRequests(k, actor)).find((r) => r.id === id);
+  if (!req) throw new HttpError(404, 'Request not found', 'not_found');
+  await k.updateTable('password_resets').set({ dismissed: 1 }).where('id', '=', id).execute();
+  await logActivity(k, actor.id, 'update', 'password_reset', req.userId, `${actor.name} dismissed ${req.name}'s password request`);
+  return c.json({ ok: true });
+});
+
 function guardAdmin(actor: User, targetRole: Role | undefined) {
   if (targetRole === 'admin' && actor.role !== 'admin') throw new HttpError(403, 'Only the Admin can manage Admin accounts', 'forbidden');
 }
@@ -286,6 +335,18 @@ users.post('/', async (c) => {
     .executeTakeFirstOrThrow();
   await logActivity(k, actor.id, 'create', 'user', u.id, `Added ${u.name} as ${u.role}`);
   return c.json(publicUser(u));
+});
+
+/** A one-time code to read out to someone who forgot their password. Shown once, works for an hour. */
+users.post('/:id/reset-code', async (c) => {
+  const actor = await need(c, 'users.manage');
+  const { k } = c.get('db');
+  const target = await k.selectFrom('users').selectAll().where('id', '=', Number(c.req.param('id'))).executeTakeFirst();
+  if (!target) throw new HttpError(404, 'User not found', 'not_found');
+  guardAdmin(actor, target.role);
+  if (target.active !== 1) throw bad('This person is deactivated');
+  const { code, expiresAt } = await k.transaction().execute((tx) => issueCode(tx, actor, target));
+  return c.json({ code, expiresAt, name: target.name });
 });
 
 users.patch('/:id', async (c) => {

@@ -46,10 +46,31 @@ describe('the Entry person uploading a products file', () => {
     expect(cat.find((x: any) => x.nameEn === 'Sugar').units[0].retail).toBe(4500); // price untouched
   });
 
-  it('still cannot import customer dues or undo an import', async () => {
+  it('still cannot import customer dues', async () => {
     expect((await entry.req('POST', '/api/import/commit', { kind: 'customers', rows: [{ name: 'X', amount: '1' }] })).status).toBe(403);
-    const imports = await owner.get('/api/imports');
-    expect((await entry.req('POST', `/api/imports/${imports[0].id}/undo`)).status).toBe(403);
+  });
+
+  it('can undo an import they made themselves, and only while it is the latest', async () => {
+    const tin = EXAMPLES.products[5].row;
+    await entry.post('/api/import/commit', { kind: 'products', rows: [tin], fileName: 'mine.xlsx' });
+    expect((await owner.get('/api/catalog')).products.some((x: any) => x.nameEn === tin.name)).toBe(true);
+    const mine = (await entry.get('/api/imports'))[0];
+    expect(mine.created_by).toBeGreaterThan(0);
+    await entry.post(`/api/imports/${mine.id}/undo`);
+    expect((await owner.get('/api/catalog')).products.some((x: any) => x.nameEn === tin.name)).toBe(false);
+    expect((await entry.get('/api/imports'))[0].undone).toBe(1);
+    // Taking it back twice is refused, as for anyone.
+    expect((await entry.req('POST', `/api/imports/${mine.id}/undo`)).status).toBe(409);
+  });
+
+  it("cannot undo an Owner's import, and the refusal is logged", async () => {
+    await owner.post('/api/import/commit', { kind: 'products', rows: [EXAMPLES.products[5].row], fileName: 'owners.xlsx' });
+    const theirs = (await owner.get('/api/imports'))[0];
+    const r = await entry.req('POST', `/api/imports/${theirs.id}/undo`);
+    expect(r.status).toBe(403);
+    expect((await owner.get('/api/activity')).some((a: any) => a.action === 'refused' && a.summary.includes('import.undo'))).toBe(true);
+    expect((await entry.req('POST', '/api/imports/99999/undo')).status).toBe(403);
+    await owner.post(`/api/imports/${theirs.id}/undo`); // the Owner still can
   });
 
   it('leaves the Owner free to update existing items from a file', async () => {

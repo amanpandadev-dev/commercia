@@ -316,6 +316,19 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     .addColumn('created_at', 'text', notNull)
     .execute();
 
+  await idCol(db.schema.createTable('password_resets').ifNotExists())
+    .addColumn('user_id', 'integer', notNull)
+    .addColumn('kind', 'text', notNull)
+    .addColumn('code_hash', 'text')
+    .addColumn('requested_at', 'text', notNull)
+    .addColumn('issued_at', 'text')
+    .addColumn('issued_by', 'integer')
+    .addColumn('expires_at', 'text')
+    .addColumn('attempts', 'integer', zero)
+    .addColumn('used_at', 'text')
+    .addColumn('dismissed', 'integer', zero)
+    .execute();
+
   await idCol(db.schema.createTable('activity').ifNotExists())
     .addColumn('user_id', 'integer')
     .addColumn('action', 'text', notNull)
@@ -391,6 +404,7 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     ['idx_ledger_customer', 'ledger', ['customer_id']],
     ['idx_supplier_ledger_supplier', 'supplier_ledger', ['supplier_id']],
     ['idx_cash_outs_supplier', 'cash_outs', ['supplier_id']],
+    ['idx_password_resets_user', 'password_resets', ['user_id']],
     ['idx_versions_entity', 'versions', ['entity', 'entity_id']],
     ['idx_activity_time', 'activity', ['created_at']],
   ];

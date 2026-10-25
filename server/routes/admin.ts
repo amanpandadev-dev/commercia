@@ -136,7 +136,7 @@ admin.get('/imports', async (c) => {
     .get('db')
     .k.selectFrom('imports as i')
     .leftJoin('users as u', 'u.id', 'i.created_by')
-    .select(['i.id', 'i.kind', 'i.file_name', 'i.summary', 'i.undone', 'i.created_at', 'u.name as by'])
+    .select(['i.id', 'i.kind', 'i.file_name', 'i.summary', 'i.undone', 'i.created_at', 'i.created_by', 'u.name as by'])
     .orderBy('i.id', 'desc')
     .limit(20)
     .execute();
@@ -144,8 +144,15 @@ admin.get('/imports', async (c) => {
 });
 
 admin.post('/imports/:id/undo', async (c) => {
-  const user = await need(c, 'import.undo');
   const id = Number(c.req.param('id'));
+  const me = c.get('user');
+  let user = me;
+  if (!can(me.role, 'import.undo')) {
+    // Everyone may take back their own import; someone else's is an Owner's call (refused and logged).
+    user = await need(c, 'import.undo.own');
+    const imp = await c.get('db').k.selectFrom('imports').select('created_by').where('id', '=', id).executeTakeFirst();
+    if (!imp || imp.created_by !== me.id) await need(c, 'import.undo');
+  }
   await c.get('db').k.transaction().execute((tx) => undoImport(tx, user, id));
   return c.json({ ok: true });
 });

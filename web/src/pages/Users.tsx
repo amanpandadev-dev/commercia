@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Download } from 'lucide-react';
+import { Plus, Download, KeyRound } from 'lucide-react';
 import { api, exportExcel } from '../api';
 import { useApp } from '../state';
 import { Avatar, Bi, Empty, Field, Modal, Seg } from '../components/ui';
@@ -36,8 +36,11 @@ export function UsersPage() {
   const [log, setLog] = useState<any[]>([]);
   const [edit, setEdit] = useState<U | 'new' | null>(null);
   const [who, setWho] = useState('');
+  const [requests, setRequests] = useState<{ id: number; userId: number; name: string; role: Role; email: string; requested_at: string }[]>([]);
+  const [code, setCode] = useState<{ id: number; name: string } | null>(null);
   const load = () => {
     api.get('/api/users').then(setUsers);
+    api.get('/api/users/password-requests').then(setRequests).catch(() => {});
     api.get(`/api/bills?from=${istDate()}&to=${istDate()}`).then(setBills);
     if (can('activity.view')) api.get(`/api/activity?limit=300${who ? `&userId=${who}` : ''}`).then(setLog);
   };
@@ -47,6 +50,22 @@ export function UsersPage() {
   }, [who]);
   return (
     <>
+      {requests.length > 0 && (
+        <div className="card">
+          <div className="card-head"><h3><KeyRound size={16} style={{ verticalAlign: -2 }} /> Password reset requests</h3></div>
+          {requests.map((r) => (
+            <div key={r.id} className="list-item" style={{ cursor: 'default' }}>
+              <Avatar name={r.name} />
+              <div className="grow">
+                <b style={{ fontWeight: 500 }}>{r.name}</b> <span className="muted">forgot their password</span>
+                <div className="faint" style={{ fontSize: 12 }}>{r.email} · asked {dateTimeOf(r.requested_at)} · Check it is really them before giving a code</div>
+              </div>
+              <button className="btn sm primary" onClick={() => setCode({ id: r.userId, name: r.name })}>Make a reset code</button>
+              <button className="btn sm ghost" onClick={async () => { await api.post(`/api/users/password-requests/${r.id}/dismiss`); load(); }}>Dismiss</button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="grid grid-3">
         {users.map((u) => (
           <div key={u.id} className="card card-pad col" style={{ opacity: u.active ? 1 : 0.55, cursor: 'pointer' }} onClick={() => setEdit(u)}>
@@ -122,7 +141,31 @@ export function UsersPage() {
         </div>
       )}
       {edit && <UserForm user={edit === 'new' ? null : edit} onClose={() => setEdit(null)} onDone={() => { setEdit(null); load(); }} />}
+      {code && <ResetCode target={code} onClose={() => { setCode(null); load(); }} />}
     </>
+  );
+}
+
+/** Makes a one-time code on open and shows it once, to read out to the person. */
+function ResetCode({ target, onClose }: { target: { id: number; name: string }; onClose: () => void }) {
+  const [res, setRes] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    api.post(`/api/users/${target.id}/reset-code`).then(setRes).catch((e) => setErr((e as Error).message));
+  }, [target.id]);
+  return (
+    <Modal title={`Reset code for ${target.name}`} onClose={onClose} foot={<button className="btn primary" onClick={onClose}>Done</button>}>
+      {err && <div className="err">{err}</div>}
+      {res && (
+        <>
+          <div className="num" style={{ fontSize: 40, letterSpacing: 6, fontWeight: 600, textAlign: 'center', padding: '12px 0' }}>{res.code}</div>
+          <div className="muted">
+            Read this out to {target.name} (after checking it is really them). On the login page they tap <b>Forgot password?</b>, then <b>I already have a code</b>, and type it with a new password.
+          </div>
+          <div className="faint" style={{ fontSize: 12 }}>It works once and stops at {timeOf(res.expiresAt)}. It is not shown again, and making another one cancels this one.</div>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -130,6 +173,7 @@ function UserForm({ user, onClose, onDone }: { user: U | null; onClose: () => vo
   const { me, toast } = useApp();
   const [f, setF] = useState({ name: user?.name ?? '', email: user?.email ?? '', role: user?.role ?? ('entry' as Role), password: '', active: user?.active ?? true });
   const [err, setErr] = useState('');
+  const [codeFor, setCodeFor] = useState(false);
   const run = async (body: object, msg: string) => {
     setErr('');
     try {
@@ -181,8 +225,10 @@ function UserForm({ user, onClose, onDone }: { user: U | null; onClose: () => vo
         <div className="row wrap">
           <button className="btn sm" onClick={() => run({ signOutAll: true }, 'Signed out of all devices')}>Sign out of all devices</button>
           {user.totpEnabled && <button className="btn sm" onClick={() => run({ resetTotp: true }, 'Authenticator reset — they set it up again at next login')}>Reset authenticator</button>}
+          {user.active && user.id !== me.id && <button className="btn sm" onClick={() => setCodeFor(true)}><KeyRound size={14} /> Make a reset code</button>}
         </div>
       )}
+      {codeFor && user && <ResetCode target={{ id: user.id, name: user.name }} onClose={() => setCodeFor(false)} />}
     </Modal>
   );
 }
