@@ -119,6 +119,9 @@ export function ImportPage() {
             <button className="btn" onClick={() => download(`/api/import/template/${kind}.csv`)}><Download size={15} /> .csv</button>
           </div>
         </div>
+        {kind === 'products' && !can('catalog.edit') && (
+          <div className="banner info">You can add new items from a file. Items that are already in the list can only be changed by an Owner, so a row for one of them (with a different price, GST or units) will be marked as an error: remove it from the file.</div>
+        )}
         <ol className="muted" style={{ margin: 0, paddingLeft: 18 }}>
           <li>Download the template and fill it in Excel or Google Sheets — or use your own sheet with similar column names.</li>
           <li>Upload it. Every row is checked and marked New, Update or Error. Nothing is saved yet.</li>

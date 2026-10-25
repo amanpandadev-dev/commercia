@@ -25,7 +25,7 @@ export const PERMISSIONS = {
   'payment.receive': ['admin', 'owner', 'entry'],
   'payment.reverse': ['admin', 'owner'],
   'cashout.create': ['admin', 'owner', 'entry'],
-  'import.products': ['admin', 'owner'],
+  'import.products': ['admin', 'owner', 'entry'], // the Entry person's file may only add new items (see addOnly in routes/admin.ts)
   'import.stock': ['admin', 'owner', 'entry'],
   'import.customers': ['admin', 'owner'],
   'import.undo': ['admin', 'owner'],

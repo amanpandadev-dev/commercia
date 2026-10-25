@@ -132,7 +132,7 @@ describe('Commercia API', () => {
     const edit = await entry.req('PATCH', `/api/products/${made.id}`, { nameEn: 'Haldi 100g', gstBp: 500, baseUnit: 'pc', units: [{ ...p.units[0], retail: 1 }] });
     expect(edit.status).toBe(403);
     expect((await entry.req('PATCH', `/api/categories/${cat.id}`, { nameEn: 'Renamed' })).status).toBe(403);
-    expect((await entry.req('POST', '/api/import/commit', { kind: 'products', rows: [{ category: 'X', name: 'Imported', baseUnit: 'kg', price: '1', gst: '0' }] })).status).toBe(403); // bulk import stays with Owners
+    expect((await entry.req('POST', '/api/import/commit', { kind: 'customers', rows: [{ name: 'X', amount: '1' }] })).status).toBe(403); // customer dues stay with Owners (products files are add-only: tests/import-permissions.test.ts)
   });
 
   it("keeps saved bills unchanged when rates change, and routes the Entry person's rate for approval (RATE-1, RATE-5, RATE-6)", async () => {

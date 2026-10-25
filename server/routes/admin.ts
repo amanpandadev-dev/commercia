@@ -10,6 +10,7 @@ import { readSheet, toCsv } from '../lib/sheets';
 import { getSettings, setSetting, type SchemePeriod } from '../lib/settings';
 import { runBackup, listBackups } from '../lib/backup';
 import { isIsoDate } from '../../shared/dates';
+import { can, type Role } from '../../shared/perms';
 import type { DB } from '../db/schema';
 
 export const admin = new Hono<AppEnv>();
@@ -20,6 +21,9 @@ const permFor: Record<ImportKind, 'import.products' | 'import.stock' | 'import.c
   stock: 'import.stock',
   customers: 'import.customers',
 };
+
+/** A products file from someone who can add items but not edit them may only contain new ones. */
+const addOnly = (user: { role: Role }, kind: ImportKind) => kind === 'products' && !can(user.role, 'catalog.edit');
 
 // ---------- Import templates (IMP-1) ----------
 admin.get('/import/template/:file', async (c) => {
@@ -107,15 +111,15 @@ admin.post('/import/preview', async (c) => {
     });
     return d;
   });
-  const preview = await previewImport(c.get('db').k, kind, rows);
+  const preview = await previewImport(c.get('db').k, kind, rows, { newOnly: addOnly(c.get('user'), kind) });
   return c.json({ fileName: file.name, headers: sheet.headers, mapped: map, ...preview });
 });
 
 /** Re-check rows after fixing them in the preview. */
 admin.post('/import/validate', async (c) => {
   const body = z.object({ kind: kindSchema, rows: z.array(z.record(z.string(), z.string())) }).parse(await c.req.json());
-  await need(c, permFor[body.kind]);
-  return c.json(await previewImport(c.get('db').k, body.kind, body.rows));
+  const user = await need(c, permFor[body.kind]);
+  return c.json(await previewImport(c.get('db').k, body.kind, body.rows, { newOnly: addOnly(user, body.kind) }));
 });
 
 admin.post('/import/commit', async (c) => {
@@ -123,7 +127,7 @@ admin.post('/import/commit', async (c) => {
     .object({ kind: kindSchema, rows: z.array(z.record(z.string(), z.string())).min(1), fileName: z.string().default(''), asOf: z.string().optional() })
     .parse(await c.req.json());
   const user = await need(c, permFor[body.kind]);
-  const res = await c.get('db').k.transaction().execute((tx) => commitImport(tx, user, body.kind, body.rows, body.fileName, { asOf: body.asOf }));
+  const res = await c.get('db').k.transaction().execute((tx) => commitImport(tx, user, body.kind, body.rows, body.fileName, { asOf: body.asOf, newOnly: addOnly(user, body.kind) }));
   return c.json(res);
 });
 

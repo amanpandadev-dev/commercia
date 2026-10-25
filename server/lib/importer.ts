@@ -265,7 +265,7 @@ async function productState(tx: Tx, productId: number, date: string) {
 }
 
 /** Validate every row against the current data; nothing is written. */
-export async function previewImport(tx: Tx, kind: ImportKind, rows: RowData[]) {
+export async function previewImport(tx: Tx, kind: ImportKind, rows: RowData[], opts: { newOnly?: boolean } = {}) {
   const out: PreviewRow[] = [];
   const newCategories = new Set<string>();
   const today = istDate();
@@ -296,6 +296,8 @@ export async function previewImport(tx: Tx, kind: ImportKind, rows: RowData[]) {
             const changes = await productChanges(tx, match.id, p, today);
             status = changes.length ? 'update' : 'same';
             notes.push(...changes);
+            // Someone who may add items but not change them (the Entry person) cannot slip a price or GST change in through a file.
+            if (opts.newOnly && changes.length) errors.push('Already in the list. Only an Owner can change it: remove this row.');
             if (p.opening) notes.push('Opening stock is ignored for existing items — use Stock in');
           }
         }
@@ -406,8 +408,8 @@ interface UndoData {
 }
 
 /** Saves all rows together, or none if anything fails (IMP-6). */
-export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: RowData[], fileName: string, opts: { asOf?: string } = {}) {
-  const preview = await previewImport(tx, kind, rows);
+export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: RowData[], fileName: string, opts: { asOf?: string; newOnly?: boolean } = {}) {
+  const preview = await previewImport(tx, kind, rows, { newOnly: opts.newOnly });
   if (preview.counts.error) throw new HttpError(422, `${preview.counts.error} row(s) still have errors — fix or skip them`, 'import_errors', preview);
   const imp = await tx
     .insertInto('imports')
