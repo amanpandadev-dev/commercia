@@ -5,7 +5,7 @@ import { useApp, type CProduct, type Category } from '../state';
 import { Field, Modal } from './ui';
 import { formatQty, parseQty, parseRupees } from '../../../shared/money';
 import { istDate } from '../../../shared/dates';
-import { PACK_KINDS, cartonUnitName, packUnitName, type PackKind } from '../../../shared/units';
+import { allPackKinds, cartonUnitName, derivePackName, packUnitName, type PackKind } from '../../../shared/units';
 
 interface UnitRow {
   id?: number;
@@ -43,11 +43,11 @@ const KINDS: { value: Kind; title: string; sub: string; eg: string }[] = [
 ];
 const kindOf = (p: CProduct): Kind => (p.packKind ? 'whole' : p.baseUnit === 'pc' ? 'packet' : 'loose');
 
-const nameFrom = (x: { family: string; brand: string; packSize: string }) =>
-  [x.family.trim(), x.brand.trim() && `— ${x.brand.trim()}`, x.packSize.trim()].filter(Boolean).join(' ').replace(/^— /, '');
+// The same name rule as the products sheet, so an item added here and one uploaded are the same item.
+const nameFrom = (x: { family: string; brand: string; packSize: string; packKind: string }) => derivePackName(x);
 
 export function ProductForm({ product, onClose, onSaved }: { product?: CProduct; onClose: () => void; onSaved: (id: number) => void }) {
-  const { categories, reloadCatalog, toast, t, settings } = useApp();
+  const { categories, reloadCatalog, reloadSettings, toast, t, settings } = useApp();
   const editing = !!product;
   const [kind, setKind] = useState<Kind | null>(product ? kindOf(product) : null);
   const [nameTouched, setNameTouched] = useState(editing);
@@ -82,9 +82,20 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
   );
   const [newCat, setNewCat] = useState('');
   const [cartonQty, setCartonQty] = useState('12');
+  const [newType, setNewType] = useState<string | null>(null); // typing a new pack type, or not
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const cats = useMemo(() => categoryOptions(categories), [categories]);
+  // Built-in pack types plus any this shop added.
+  const kinds = useMemo(() => {
+    let custom: string[] = [];
+    try {
+      custom = JSON.parse(settings?.pack_types ?? '[]');
+    } catch {
+      /* none */
+    }
+    return allPackKinds(custom);
+  }, [settings?.pack_types]);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
 
   const base = units.find((u) => u.isBase)!;
@@ -114,8 +125,18 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
     nameBase(b);
   };
   const setPackKind = (pk: PackKind) => {
-    set('packKind', pk);
+    setF((x) => ({ ...x, packKind: pk, ...(kind === 'whole' && !nameTouched ? { nameEn: nameFrom({ ...x, packKind: pk }) } : {}) }));
     nameBase(packUnitName(pk, f.packSize));
+  };
+  const addType = async () => {
+    try {
+      const r = await api.post('/api/pack-types', { name: newType ?? '' });
+      await reloadSettings();
+      setNewType(null);
+      setPackKind(r.value);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
   };
   /** Company, item group and pack size build the name until someone types their own. */
   const setPackField = (key: 'family' | 'brand' | 'packSize', v: string) => {
@@ -267,9 +288,18 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
             <div className="card card-pad" style={{ boxShadow: 'none' }}>
               <div className="grid grid-2">
                 <Field label="Pack type">
-                  <select className="input" value={f.packKind} onChange={(e) => setPackKind(e.target.value as PackKind)}>
-                    {PACK_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
-                  </select>
+                  {newType === null ? (
+                    <select className="input" value={f.packKind} onChange={(e) => (e.target.value === '__new' ? setNewType('') : setPackKind(e.target.value))}>
+                      {kinds.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+                      <option value="__new">+ New type…</option>
+                    </select>
+                  ) : (
+                    <div className="row">
+                      <input className="input" value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="e.g. sack" autoFocus onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addType(); } }} />
+                      <button type="button" className="btn primary" onClick={addType} disabled={!newType.trim()}>Add</button>
+                      <button type="button" className="btn ghost" onClick={() => setNewType(null)}>Cancel</button>
+                    </div>
+                  )}
                 </Field>
                 <Field label="Pack size" hint="Just a label: 50 kg, 25 kg, 1 L">
                   <input className="input" value={f.packSize} onChange={(e) => setPackField('packSize', e.target.value)} placeholder="25 kg" autoFocus />

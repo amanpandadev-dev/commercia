@@ -6,6 +6,7 @@ import { Field, Modal, Seg } from '../components/ui';
 import { BillDoc, type BillDetail } from '../components/BillDoc';
 import { dateTimeOf } from '../format';
 import { istDate } from '../../../shared/dates';
+import { allPackKinds } from '../../../shared/units';
 
 const SAMPLE = (shop: Settings): BillDetail => ({
   bill: {
@@ -88,6 +89,12 @@ export function SettingsPage() {
             <span>{t('Prices include GST')}<span className="faint" style={{ display: 'block', fontSize: 12 }}>{s.prices_include_gst === '0' ? 'Bills add GST on top of the price.' : 'Shelf prices (MRP) already contain GST; the bill takes the tax back out.'}</span></span>
             <Seg value={s.prices_include_gst ?? '1'} onChange={(v) => edit && save({ prices_include_gst: v })} options={[{ value: '1', label: 'Yes' }, { value: '0', label: 'No' }]} />
           </div>
+          <div className="row between">
+            <span>Default GST % for items from the products sheet<span className="faint" style={{ display: 'block', fontSize: 12 }}>The sheet has no GST column. Change a single item later in Add Product.</span></span>
+            <select className="input sm" style={{ width: 'auto' }} value={s.default_gst ?? '5'} disabled={!edit} onChange={(e) => save({ default_gst: e.target.value })} aria-label="Default GST">
+              {['0', '5', '12', '18', '28'].map((g) => <option key={g} value={g}>{g}%</option>)}
+            </select>
+          </div>
           <div className="col gap-4">
             {schemes.map((p) => (
               <div key={p.from} className="row"><span className="tag neutral">{p.from === '2000-01-01' ? 'From the start' : `From ${p.from}`}</span> {p.scheme === 'regular' ? 'Regular GST' : p.scheme === 'composition' ? 'Composition scheme' : 'Not registered'}</div>
@@ -108,6 +115,8 @@ export function SettingsPage() {
           )}
           <span className="faint" style={{ fontSize: 12 }}>Bills dated before a change keep their old type. Rates and declarations come from your accountant; Commercia stores what you enter.</span>
         </div>
+
+        <PackTypes />
 
         <div className="card card-pad col">
           <div className="label-sm" style={{ color: 'var(--accent-text)' }}>{t('Security').toUpperCase()}</div>
@@ -193,5 +202,44 @@ function ResetDialog({ shopName, onClose }: { shopName: string; onClose: () => v
       <p style={{ margin: 0 }}>Type the shop name <b>{shopName}</b> to confirm. Users and settings stay; everything else is removed after a backup.</p>
       <input className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoFocus />
     </Modal>
+  );
+}
+
+/** The pack types in the product form and the dropdown of the products sheet: the built-in ones, and this shop's own. */
+function PackTypes() {
+  const { settings, can, toast, reloadSettings } = useApp();
+  const [name, setName] = useState('');
+  let custom: string[] = [];
+  try {
+    custom = JSON.parse(settings?.pack_types ?? '[]');
+  } catch {
+    /* none */
+  }
+  const kinds = allPackKinds(custom);
+  const add = async () => {
+    try {
+      await api.post('/api/pack-types', { name });
+      await reloadSettings();
+      setName('');
+      toast(`${name.trim()} added. Download the products template again to see it in the dropdown.`);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
+  return (
+    <div className="card card-pad col">
+      <div className="label-sm" style={{ color: 'var(--accent-text)' }}>PACK TYPES</div>
+      <div className="row wrap gap-4">
+        {kinds.map((k) => <span key={k.value} className={`tag ${custom.includes(k.value) ? 'info' : 'neutral'}`}>{k.name}</span>)}
+        <span className="tag neutral">Loose</span>
+      </div>
+      <span className="faint" style={{ fontSize: 12 }}>Used in Add Product and in the Pack type dropdown of the products sheet. Loose is for things sold by the kg or litre.</span>
+      {can('catalog.add') && (
+        <div className="row">
+          <input className="input" style={{ maxWidth: 220 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="New type, e.g. sack" onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) add(); }} />
+          <button className="btn" onClick={add} disabled={!name.trim()}>Add</button>
+        </div>
+      )}
+    </div>
   );
 }

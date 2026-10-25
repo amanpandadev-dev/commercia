@@ -7,7 +7,8 @@ import type { AppEnv } from '../lib/core';
 import { HttpError, bad, logActivity, need } from '../lib/core';
 import { EXAMPLES, FIELDS, commitImport, mapHeaders, previewImport, undoImport, type ImportKind, type RowData } from '../lib/importer';
 import { readSheet, toCsv } from '../lib/sheets';
-import { getSettings, setSetting, type SchemePeriod } from '../lib/settings';
+import { customPackTypes, getSettings, setSetting, type SchemePeriod } from '../lib/settings';
+import { LOOSE_WORD, allPackKinds, cleanPackKindName, findPackKind, parsePackSize } from '../../shared/units';
 import { runBackup, listBackups } from '../lib/backup';
 import { isIsoDate } from '../../shared/dates';
 import { can, type Role } from '../../shared/perms';
@@ -25,12 +26,25 @@ const permFor: Record<ImportKind, 'import.products' | 'import.stock' | 'import.c
 /** A products file from someone who can add items but not edit them may only contain new ones. */
 const addOnly = (user: { role: Role }, kind: ImportKind) => kind === 'products' && !can(user.role, 'catalog.edit');
 
+// Pack sizes offered in the dropdown, with any size this shop already uses added.
+const COMMON_SIZES = [
+  '100 g', '200 g', '250 g', '500 g', '1 kg', '2 kg', '5 kg', '10 kg', '15 kg', '20 kg', '25 kg', '26 kg', '28 kg', '30 kg', '40 kg', '50 kg',
+  '100 ml', '200 ml', '250 ml', '500 ml', '1 L', '2 L', '5 L', '10 L', '15 L', '1 pc', '6 pc', '12 pc', '24 pc',
+];
+const UNIT_ORDER = ['g', 'kg', 'ml', 'L', 'pc'];
+const bySize = (a: string, b: string) => {
+  const x = parsePackSize(a);
+  const y = parsePackSize(b);
+  if (!x || !y) return a.localeCompare(b);
+  return UNIT_ORDER.indexOf(x.unit) - UNIT_ORDER.indexOf(y.unit) || x.qty - y.qty;
+};
+
 // ---------- Import templates (IMP-1) ----------
 admin.get('/import/template/:file', async (c) => {
   const m = c.req.param('file').match(/^(products|stock|customers)\.(xlsx|csv)$/);
   if (!m) throw bad('Unknown template');
   const kind = m[1] as ImportKind;
-  const fields = FIELDS[kind];
+  const fields = FIELDS[kind].filter((f) => !f.advanced); // the products template has exactly the eight simple columns
   const title = { products: 'Products', stock: 'Stock deliveries', customers: 'Customer dues' }[kind];
   const examples = EXAMPLES[kind];
   const rowOf = (e: Record<string, string>) => fields.map((f) => e[f.key] ?? '');
@@ -47,35 +61,59 @@ admin.get('/import/template/:file', async (c) => {
   head.alignment = { vertical: 'middle', wrapText: true };
   fields.forEach((f, i) => {
     const cell = head.getCell(i + 1);
-    // Whole-pack columns are shaded differently, so it is clear they are only for bori / bag / tin / pouch items.
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: f.wholePack ? 'FFFCE3C4' : 'FFDDF1EC' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDF1EC' } };
     cell.note = f.help; // hover a heading to see how to fill the column
   });
   for (const e of examples) ws.addRow(rowOf(e.row));
   ws.getRows(2, examples.length)?.forEach((r) => (r.font = { italic: true, color: { argb: 'FF6B7280' } }));
   ws.views = [{ state: 'frozen', ySplit: 1 }];
 
-  const help = wb.addWorksheet('Instructions');
-  help.columns = [{ header: 'Column', width: 30 }, { header: 'Required', width: 10 }, { header: 'How to fill it', width: 100 }];
-  help.getRow(1).font = { bold: true };
-  help.addRow(['Start here', '', 'The grey rows on the first sheet are examples: delete them (or overwrite them) before you upload, or they will be added as real items.']);
   if (kind === 'products') {
-    help.addRow(['Which columns do I fill?', '', '']);
-    const kinds: [string, string][] = [
-      ['Loose, sold by kg or litre (sugar, dal, oil)', 'Category path, Product name, Base unit = kg or L, Selling price, GST %. Optional: Extra units and their prices if it also comes in bags or tins.'],
-      ['Packet or piece (tea, soap, biscuits)', 'Category path, Product name, Base unit = pc, Selling price, GST %. Optional: Extra units such as Box of 12 = 12.'],
-      ['Bori or Bag, sold WHOLE (one product per company and size)', 'Category path, Product name, Brand, Pack type = Bori or Bag, Pack size, Item group, Selling price of ONE bori / bag, GST %. Leave Base unit empty. Opening stock is the number of bori / bags.'],
-      ['Tin, pouch, jar or bottle (ghee, refined oil), sold whole', 'The same as bori / bag, with Pack type = Tin, Pouch, Jar or Bottle. For cartons add Extra units: Carton (12 × 1 L) = 12.'],
-    ];
-    for (const [k, v] of kinds) help.addRow([k, '', v]);
-    help.addRow(['One product per company and size', '', 'Sooji by two companies in two sizes is FOUR rows: each has its own price and stock. "Item group" (Sooji) is what lines them up in the Stock summary.']);
-    help.addRow([]);
+    // The dropdowns read their choices from a hidden sheet: pack types (built in + this shop's own) and sizes.
+    const { k } = c.get('db');
+    const types = [...allPackKinds(customPackTypes(await getSettings(k))).map((t) => t.name), LOOSE_WORD];
+    const used = (await k.selectFrom('products').select('pack_size').distinct().where('pack_size', '!=', '').execute()).map((r) => r.pack_size);
+    const sizes = [...new Map([...COMMON_SIZES, ...used].map((x) => [x.toLowerCase(), x])).values()].sort(bySize);
+    const lists = wb.addWorksheet('Lists');
+    lists.addRow(['Pack type', 'Pack size']);
+    for (let i = 0; i < Math.max(types.length, sizes.length); i++) lists.addRow([types[i] ?? '', sizes[i] ?? '']);
+    lists.state = 'hidden';
+    // One validation per column range. (Cell by cell, ExcelJS merges them into overlapping ranges and Excel "repairs" the file.)
+    const LAST = 500;
+    const rangeOf = (key: string) => {
+      const letter = ws.getColumn(fields.findIndex((f) => f.key === key) + 1).letter;
+      return `${letter}2:${letter}${LAST}`;
+    };
+    // (ExcelJS's own typings leave out the worksheet's validation table, which exists at runtime.)
+    const rules = (ws as unknown as { dataValidations: { model: Record<string, unknown> } }).dataValidations.model;
+    rules[rangeOf('packKind')] = {
+      type: 'list', allowBlank: true, formulae: [`Lists!$A$2:$A$${types.length + 1}`],
+      showInputMessage: true, promptTitle: 'Pack type', prompt: 'Pick from the list (Bori, Bag, Can… or Loose).',
+      showErrorMessage: true, errorStyle: 'stop', errorTitle: 'Pick from the list',
+      error: 'Choose a pack type from the list. To add a new one, add it in Commercia first (Add Product, Pack type, New type), then download this template again.',
+    };
+    rules[rangeOf('packSize')] = {
+      type: 'list', allowBlank: true, formulae: [`Lists!$B$2:$B$${sizes.length + 1}`],
+      showInputMessage: true, promptTitle: 'Pack size', prompt: 'Pick a size, or type your own: a number and kg, g, L, ml or pc.',
+      showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not in the list',
+      error: 'Use a number and kg, g, L, ml or pc, like 25 kg or 500 ml. Continue only if that is what you meant.',
+    };
+    for (const key of ['price', 'opening', 'reorder']) {
+      rules[rangeOf(key)] = { type: 'decimal', operator: 'greaterThanOrEqual', formulae: [0], allowBlank: true, showErrorMessage: true, errorStyle: 'stop', errorTitle: 'A number', error: 'Enter a number, 0 or more.' };
+    }
   }
-  help.addRow(['Every column', '', '']);
+
+  const help = wb.addWorksheet('Instructions');
+  help.columns = [{ header: 'Column', width: 26 }, { header: 'Required', width: 10 }, { header: 'How to fill it', width: 100 }];
+  help.getRow(1).font = { bold: true };
+  help.addRow(['Start here', '', 'The grey rows on the first sheet are examples. Delete them before you upload, or they will be added as real items.']);
   for (const f of fields) help.addRow([f.header, f.required ? 'Yes' : '', f.help]);
   help.addRow([]);
-  help.addRow(['Tip', '', 'Keep the first row as headings. Hindi text is fine (use a normal Unicode Hindi font, not Kruti Dev).']);
-  if (kind === 'products') help.addRow(['Tip', '', 'Uploading the same file again changes nothing. Items are matched by Code, otherwise by Product name.']);
+  if (kind === 'products') {
+    help.addRow(['One row per company and size', '', 'Sugar from two companies, each in 50 kg and 25 kg, is four rows. Each has its own price and stock.']);
+    help.addRow(['Names are made for you', '', 'From the columns: Sooji — Annapurna 25 kg Bag. Upload the same file again and nothing changes; change a price and that row is updated.']);
+    help.addRow(['GST', '', 'New items get the default GST % in Settings; change one item later in Add Product. Prices include GST.']);
+  }
   if (kind === 'stock') help.addRow(['Tip', '', 'The product names must already exist in Commercia. Upload your products first.']);
   help.getColumn(3).alignment = { wrapText: true, vertical: 'top' };
   const buf = await wb.xlsx.writeBuffer();
@@ -157,6 +195,22 @@ admin.post('/imports/:id/undo', async (c) => {
   return c.json({ ok: true });
 });
 
+// ---------- Pack types: the list in the product form and the dropdown of the products sheet ----------
+admin.post('/pack-types', async (c) => {
+  const user = await need(c, 'catalog.add');
+  const { name } = z.object({ name: z.string() }).parse(await c.req.json());
+  const clean = cleanPackKindName(name);
+  if (!clean) throw bad('A pack type is a word of 2 to 20 letters, like "can" or "sack" (and not "Loose")');
+  const { k } = c.get('db');
+  const custom = customPackTypes(await getSettings(k));
+  const have = findPackKind(clean, custom);
+  if (have) throw new HttpError(409, `"${have.name}" is already in the list`, 'conflict');
+  const next = [...custom, clean];
+  await setSetting(k, 'pack_types', JSON.stringify(next));
+  await logActivity(k, user.id, 'create', 'pack_type', null, `Added pack type "${clean}"`);
+  return c.json({ value: clean, packTypes: allPackKinds(next) });
+});
+
 // ---------- Settings (ADM-1, GST-1, GST-3) ----------
 admin.get('/settings', async (c) => c.json(await getSettings(c.get('db').k)));
 
@@ -175,6 +229,7 @@ admin.patch('/settings', async (c) => {
       prefix_estimate: z.string().min(1).max(8).optional(),
       composition_pct: z.string().optional(),
       prices_include_gst: z.enum(['0', '1']).optional(),
+      default_gst: z.enum(['0', '5', '12', '18', '28']).optional(),
       require_2fa: z.enum(['0', '1']).optional(),
       backup_dir: z.string().optional(),
       default_lang: z.enum(['en', 'hi']).optional(),

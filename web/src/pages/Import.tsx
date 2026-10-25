@@ -22,11 +22,10 @@ interface Preview {
 }
 
 const COLUMNS: Record<Kind, { key: string; label: string }[]> = {
+  // The same eight columns as the template, in the same order.
   products: [
-    { key: 'category', label: 'Category path' }, { key: 'name', label: 'Product name' }, { key: 'nameHi', label: 'Hindi' }, { key: 'brand', label: 'Brand' },
-    { key: 'packKind', label: 'Pack type' }, { key: 'packSize', label: 'Pack size' }, { key: 'family', label: 'Item group' }, { key: 'baseUnit', label: 'Base unit' },
-    { key: 'units', label: 'Extra units' }, { key: 'price', label: 'Price' }, { key: 'unitPrices', label: 'Unit prices' }, { key: 'gst', label: 'GST %' }, { key: 'hsn', label: 'HSN' },
-    { key: 'reorder', label: 'Reorder' }, { key: 'opening', label: 'Opening stock' }, { key: 'aliases', label: 'Aliases' },
+    { key: 'category', label: 'Category' }, { key: 'brand', label: 'Brand' }, { key: 'packKind', label: 'Pack type' }, { key: 'packSize', label: 'Pack size' },
+    { key: 'price', label: 'Pack price' }, { key: 'opening', label: 'Stock' }, { key: 'reorder', label: 'Reorder at' }, { key: 'aliases', label: 'Aliases (Hindi names)' },
   ],
   stock: [{ key: 'date', label: 'Date' }, { key: 'supplier', label: 'Supplier' }, { key: 'product', label: 'Product' }, { key: 'qty', label: 'Qty' }, { key: 'unit', label: 'Unit' }, { key: 'rate', label: 'Rate' }],
   customers: [{ key: 'name', label: 'Name' }, { key: 'amount', label: 'Amount owed' }, { key: 'nickname', label: 'Nickname' }, { key: 'phone', label: 'Phone' }, { key: 'area', label: 'Area' }],

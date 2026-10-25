@@ -18,6 +18,8 @@ export const DEFAULT_SETTINGS = {
   prefix_estimate: 'EST',
   gst_schemes: JSON.stringify([{ from: '2000-01-01', scheme: 'regular' }] satisfies SchemePeriod[]),
   composition_pct: '1',
+  default_gst: '5', // GST % for items added from the products sheet, which has no GST column; change it per product later
+  pack_types: '[]', // JSON list of pack types this shop added (bori, bag, can… are built in)
   prices_include_gst: '1', // MRPs and shelf prices already contain GST; bills take the tax back out
   require_2fa: '1',
   edit_window_min: '60', // Q7: about an hour
@@ -25,6 +27,16 @@ export const DEFAULT_SETTINGS = {
   last_backup_at: '',
   default_lang: 'en',
 };
+
+/** Pack types this shop added on top of the built-in ones. */
+export function customPackTypes(settings: Pick<Settings, 'pack_types'>): string[] {
+  try {
+    const v = JSON.parse(settings.pack_types) as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
 export type SettingKey = keyof typeof DEFAULT_SETTINGS;
 export type Settings = Record<SettingKey, string>;

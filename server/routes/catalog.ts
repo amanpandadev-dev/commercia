@@ -8,6 +8,8 @@ import { changeRate, markChecked, setPrice } from '../lib/rates';
 import { correctBillRate } from '../lib/billing';
 import { istDate, isIsoDate } from '../../shared/dates';
 import { formatRupees } from '../../shared/money';
+import { findPackKind } from '../../shared/units';
+import { customPackTypes, getSettings } from '../lib/settings';
 import type { User } from '../db/schema';
 
 export const catalog = new Hono<AppEnv>();
@@ -99,7 +101,7 @@ const productSchema = z.object({
   type: z.string().trim().default(''),
   family: z.string().trim().default(''),
   packSize: z.string().trim().default(''),
-  packKind: z.enum(['', 'bori', 'bag', 'tin', 'jar', 'pouch', 'bottle', 'pack']).default(''),
+  packKind: z.string().trim().toLowerCase().max(30).default(''),
   hsn: z.string().trim().default(''),
   gstBp: z.number().int().min(0).max(4000),
   gstFrom: z.string().optional(),
@@ -122,6 +124,9 @@ type ProductInput = z.infer<typeof productSchema>;
 async function writeProduct(tx: Tx, user: User, body: ProductInput, existingId?: number): Promise<number> {
   // A whole-pack item is counted in packs: one base unit, never sold loose.
   if (body.packKind && (body.baseUnit !== 'pc' || body.loose)) throw bad('A bori, bag or tin item is counted in packs: base unit pc, not sold loose');
+  // Only a type from the list (built in, or added by the shop), stored in its standard form.
+  const kind = body.packKind ? findPackKind(body.packKind, customPackTypes(await getSettings(tx))) : undefined;
+  if (body.packKind && !kind) throw bad(`"${body.packKind}" is not a pack type in the list. Add it first.`);
   const bases = body.units.filter((u) => u.isBase);
   if (bases.length !== 1 || bases[0].factorMilli !== 1000) throw bad('Exactly one base unit with size 1 is needed');
   const names = body.units.map((u) => u.name.toLowerCase());
@@ -142,7 +147,7 @@ async function writeProduct(tx: Tx, user: User, body: ProductInput, existingId?:
     type: body.type,
     family: body.family,
     pack_size: body.packSize,
-    pack_kind: body.packKind,
+    pack_kind: kind?.value ?? '',
     hsn: body.hsn,
     base_unit: body.baseUnit,
     loose: body.loose ? 1 : 0,
