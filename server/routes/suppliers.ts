@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../lib/core';
 import { HttpError, bad, logActivity, need, notFound } from '../lib/core';
 import { nowIso } from '../db/index';
+import { itemsBoughtFromSupplier } from '../lib/itemSummary';
 import { paySupplier, reverseSupplierPayment, supplierAgeing, supplierBalances, supplierEntry } from '../lib/suppliers';
 import { formatDate, istDate, isIsoDate } from '../../shared/dates';
 import { formatRupees } from '../../shared/money';
@@ -115,6 +116,8 @@ suppliers.get('/supplier-ledger/:id', async (c) => {
     opening,
     closing: entries.length ? entries[entries.length - 1].balance : opening,
     entries,
+    // The list under the statement: what was bought in this date range, per item.
+    items: await itemsBoughtFromSupplier(k, id, from || undefined, to || undefined),
     totals: {
       purchased: entries.filter((r) => r.kind !== 'reversal').reduce((a, r) => a + r.owed_paise, 0),
       paid: entries.reduce((a, r) => a + r.paid_paise, 0),

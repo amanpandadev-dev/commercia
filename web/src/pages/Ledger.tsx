@@ -8,7 +8,8 @@ import { SupplierLedger } from './SupplierLedger';
 import { CustomerForm } from '../components/CustomerForm';
 import { VersionList } from './Inventory';
 import { rs, MODE_LABEL, MODES, type Mode } from '../format';
-import { parseRupees } from '../../../shared/money';
+import { formatQty, parseRupees } from '../../../shared/money';
+import { ItemsBought } from '../components/ItemsBought';
 import { addDays, formatDate, istDate, shortDate } from '../../../shared/dates';
 
 /** The ledger has two sides: customers who owe us (Sales), and suppliers we owe (Purchase). */
@@ -257,6 +258,7 @@ function CustomerPanel({ customer, onPay, onChanged }: { customer: CustomerRow; 
             </table>
             {d.entries.length === 0 && !from && <Empty>No entries yet</Empty>}
           </div>
+          <ItemsBought items={d.items ?? []} title={from || to ? 'Items bought in this period' : 'Items bought'} times="bills" />
         </>
       )}
       {tab === 'payments' && (
@@ -365,6 +367,19 @@ function Statement({ customer, onClose }: { customer: any; onClose: () => void }
                   <tr><td /><td><b>Closing balance</b></td><td /><td /><td className="r"><b>{(d.closing / 100).toFixed(2)}</b></td></tr>
                 </tbody>
               </table>
+              {d.items?.length > 0 && (
+                <>
+                  <div style={{ margin: '16px 0 6px', fontWeight: 600 }}>Items bought</div>
+                  <table>
+                    <thead><tr><th>Item</th><th className="r">Quantity</th><th className="r">Bills</th><th className="r">Amount</th></tr></thead>
+                    <tbody>
+                      {d.items.map((i: any) => (
+                        <tr key={`${i.productId}|${i.unit}`}><td>{i.name}</td><td className="r">{formatQty(i.qtyMilli)} {i.unit}</td><td className="r">{i.times}</td><td className="r">{(i.amountPaise / 100).toFixed(2)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
             </div>
           )}
         </div>
