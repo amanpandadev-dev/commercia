@@ -3,7 +3,7 @@ import { Download, Upload, Undo2, RefreshCw } from 'lucide-react';
 import { api, download } from '../api';
 import { useApp } from '../state';
 import { Empty, Field, Seg } from '../components/ui';
-import { dateTimeOf } from '../format';
+import { dateTimeOf, rs } from '../format';
 import { istDate } from '../../../shared/dates';
 
 type Kind = 'products' | 'stock' | 'customers';
@@ -21,15 +21,20 @@ interface Preview {
   fileName?: string;
 }
 
-const COLUMNS: Record<Kind, { key: string; label: string }[]> = {
+const COLUMNS: Record<Kind, { key: string; label: string; computed?: boolean }[]> = {
+  // The same eight columns as the template, in the same order.
   products: [
-    { key: 'category', label: 'Category path' }, { key: 'name', label: 'Product name' }, { key: 'nameHi', label: 'Hindi' }, { key: 'brand', label: 'Brand' },
-    { key: 'packKind', label: 'Pack type' }, { key: 'packSize', label: 'Pack size' }, { key: 'family', label: 'Item group' }, { key: 'baseUnit', label: 'Base unit' },
-    { key: 'units', label: 'Extra units' }, { key: 'price', label: 'Price' }, { key: 'unitPrices', label: 'Unit prices' }, { key: 'gst', label: 'GST %' }, { key: 'hsn', label: 'HSN' },
-    { key: 'reorder', label: 'Reorder' }, { key: 'opening', label: 'Opening stock' }, { key: 'aliases', label: 'Aliases' },
+    { key: 'category', label: 'Category' }, { key: 'brand', label: 'Brand' }, { key: 'packKind', label: 'Pack type' }, { key: 'packSize', label: 'Pack size' },
+    { key: 'price', label: 'Pack price' }, { key: 'opening', label: 'Stock' }, { key: 'reorder', label: 'Reorder at' }, { key: 'aliases', label: 'Aliases (Hindi names)' },
   ],
-  stock: [{ key: 'date', label: 'Date' }, { key: 'supplier', label: 'Supplier' }, { key: 'product', label: 'Product' }, { key: 'qty', label: 'Qty' }, { key: 'unit', label: 'Unit' }, { key: 'rate', label: 'Rate' }],
-  customers: [{ key: 'name', label: 'Name' }, { key: 'amount', label: 'Amount owed' }, { key: 'nickname', label: 'Nickname' }, { key: 'phone', label: 'Phone' }, { key: 'area', label: 'Area' }],
+  // Amount is Quantity × Rate, worked out by the server.
+  stock: [
+    { key: 'date', label: 'Date' }, { key: 'supplier', label: 'Supplier' }, { key: 'product', label: 'Product' }, { key: 'qty', label: 'Qty' },
+    { key: 'unit', label: 'Unit' }, { key: 'rate', label: 'Rate' }, { key: 'total', label: 'Amount', computed: true },
+  ],
+  customers: [
+    { key: 'party', label: 'Type' }, { key: 'name', label: 'Name' }, { key: 'amount', label: 'Amount owed' }, { key: 'nickname', label: 'Nickname' }, { key: 'phone', label: 'Phone' }, { key: 'area', label: 'Area' },
+  ],
 };
 
 const STATUS: Record<Row['status'], { label: string; cls: string }> = {
@@ -107,13 +112,26 @@ export function ImportPage() {
     }
   };
 
+  // What the delivery rows being imported add to each supplier's purchase ledger (Σ quantity × rate, per supplier).
+  const ledger = useMemo(() => {
+    if (kind !== 'stock') return null;
+    const by = new Map<string, number>();
+    for (const r of included) {
+      if (r.status === 'error') continue;
+      // (For a moment after switching tabs, the rows on screen are still the other kind's, with no supplier.)
+      const name = (r.data.supplier ?? '').trim();
+      if (name) by.set(name, (by.get(name) ?? 0) + Math.round(Number(r.data.total || 0) * 100));
+    }
+    return { suppliers: [...by.entries()], total: [...by.values()].reduce((a, x) => a + x, 0) };
+  }, [included, kind]);
+
   const shown = (preview?.rows ?? []).filter((r) => !filter || r.status === filter);
 
   return (
     <>
       <div className="card card-pad col">
         <div className="row wrap between">
-          <Seg value={kind} onChange={setKind} options={kinds.map((k) => ({ value: k, label: k === 'products' ? 'Products & opening stock' : k === 'stock' ? 'Stock deliveries' : 'Customer dues (khata)' }))} />
+          <Seg value={kind} onChange={setKind} options={kinds.map((k) => ({ value: k, label: k === 'products' ? 'Products & opening stock' : k === 'stock' ? 'Stock deliveries' : 'Dues: customers & suppliers' }))} />
           <div className="row">
             <button className="btn" onClick={() => download(`/api/import/template/${kind}.xlsx`)}><Download size={15} /> Template .xlsx</button>
             <button className="btn" onClick={() => download(`/api/import/template/${kind}.csv`)}><Download size={15} /> .csv</button>
@@ -160,7 +178,7 @@ export function ImportPage() {
                     </td>
                     {COLUMNS[kind].map((c) => (
                       <td key={c.key}>
-                        {r.status === 'error' ? (
+                        {r.status === 'error' && !c.computed ? (
                           <input
                             className="input sm"
                             style={{ minWidth: 80 }}
@@ -169,7 +187,7 @@ export function ImportPage() {
                             onBlur={() => recheck(preview.rows)}
                           />
                         ) : (
-                          <span>{r.data[c.key]}</span>
+                          <span className={c.computed ? 'num' : undefined}>{c.computed && r.data[c.key] ? rs(Math.round(Number(r.data[c.key]) * 100)) : r.data[c.key]}</span>
                         )}
                       </td>
                     ))}
@@ -180,6 +198,11 @@ export function ImportPage() {
             </table>
             {shown.length === 0 && <Empty>No rows here</Empty>}
           </div>
+          {ledger && ledger.total > 0 && (
+            <div className="card-pad banner info" style={{ borderRadius: 0 }}>
+              <b>{rs(ledger.total)}</b> will be added to what you owe suppliers (Ledger → Purchase): {ledger.suppliers.map(([name, paise]) => `${name} ${rs(paise)}`).join(' · ')}
+            </div>
+          )}
           <div className="card-pad row wrap" style={{ borderTop: '1px solid var(--border)' }}>
             {kind === 'customers' && <Field label="Opening balance as on"><input type="date" className="input" value={asOf} onChange={(e) => setAsOf(e.target.value)} /></Field>}
             <span className="grow muted">{counts.new} new · {counts.update} updated · {counts.same} unchanged{blocking ? ` · ${blocking} errors to fix or skip` : ''}</span>

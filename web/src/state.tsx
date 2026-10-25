@@ -71,6 +71,8 @@ export interface Settings {
   prefix_estimate: string;
   gst_schemes: string;
   prices_include_gst: string;
+  default_gst: string;
+  pack_types: string;
   composition_pct: string;
   require_2fa: string;
   edit_window_min: string;

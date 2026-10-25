@@ -77,8 +77,8 @@ export async function saveStockIn(tx: Tx, user: User, body: StockInBody, importI
     })
     .returning('id')
     .executeTakeFirstOrThrow();
-  // Imported deliveries are history: they count as paid, so they put nothing on the purchase ledger.
-  if (supplierId && !importId && amount > 0) {
+  // Every delivery from a named supplier goes on their purchase ledger, imported ones too (a stock file's rows total up per supplier and date).
+  if (supplierId && amount > 0) {
     await supplierEntry(tx, user, {
       supplierId, date: body.date, kind: 'purchase', refType: 'stock_in', refId: si.id, owed: amount,
       note: ['Stock in', body.invoiceNo?.trim() && `invoice ${body.invoiceNo.trim()}`].filter(Boolean).join(' · '),
