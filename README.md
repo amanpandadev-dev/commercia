@@ -44,9 +44,19 @@ If Windows asks about the firewall, allow **Private networks** so phones on the 
 | Start | `npm start` on the shop laptop. The console prints the address for this computer and for phones on the shop Wi-Fi (PILOT-2). Set `HOST=127.0.0.1` to keep it on the laptop only. |
 | Data | One file: `data/commercia.db`. Set `COMMERCIA_DB=/path/file.db` to put it elsewhere. |
 | Backups | Automatic every night after 9 pm, and at start-up if the last one is over a day old. The last 30 copies are kept. **Settings → Backup** has *Back up now*, *Download a copy*, and the folder setting (point it at a USB drive or a Google Drive/OneDrive synced folder). |
-| Products | **Import → Products & opening stock**: download the template, fill it in, upload, check the preview, confirm. The uploaded file isn't stored. Re-uploading the same file changes nothing. |
+| Products | **Import → Products & opening stock**: download the template (the grey rows are worked examples for loose items, packets, bori, bag, pouch with carton and tin; hover a heading to see how to fill it; the *Instructions* sheet says which columns each kind of item needs), delete the examples, fill it in, upload, check the preview, confirm. The uploaded file isn't stored. Re-uploading the same file changes nothing. |
 | Old khata | **Import → Customer dues**: only *Name* and *Amount owed* are required. A negative amount means the customer has paid in advance. |
 | Wipe test data | **Settings → Before go-live** (Admin only; you type the shop name to confirm). Users and settings stay, and a backup is taken first. |
+
+### Forgot your password?
+
+On the login page tap **Forgot password?**, choose your name, and **Get a reset code**.
+
+- **Without email** (the default at the shop): the Owner or Admin sees your request on their Dashboard and under **Users**, checks it is really you, taps **Make a reset code** and reads the 8-character code out to you. You type it with a new password. A code works once, for an hour, and allows five wrong tries.
+- **With email**: set `SMTP_URL` (for example `smtps://user:password@smtp.example.com:465`) and `MAIL_FROM` before starting, and the code is emailed to the address on the account instead (it works for 30 minutes). If sending fails, the request goes to the Owner as above.
+- **The Admin** can't be reset by anyone else in the app. Without email, run this on the shop computer: `npm run reset-password -- ramesh@shop.in` (prints a new password; add `--reset-2fa` if the authenticator phone is lost).
+
+Setting a new password signs that person out everywhere. It does not switch off their authenticator-app code.
 
 ### Restore a backup (ADM-3, PILOT-5)
 
@@ -74,11 +84,12 @@ The server checks permissions on every request, not just the screens (AUTH-3, PI
 | Bills, stock in, payments, customers | ✓ | ✓ | ✓ |
 | Change a rate | applies at once | applies at once | sent for approval |
 | Cancel bills, reverse payments, adjust stock, record losses | ✓ | ✓ | report a shortage only |
-| Edit products, prices, GST, settings | ✓ | ✓ | — |
+| Add a new product (with its first price, and a category if needed), singly or from a products spreadsheet; undo your own latest import | ✓ | ✓ | ✓ |
+| Edit products, prices, GST, categories, settings; change existing items from a spreadsheet; import customer dues; undo someone else's import | ✓ | ✓ | — |
 | Reports, review, activity log, approvals | ✓ | ✓ | day book only |
 | Stock summary | ✓ | ✓ | ✓ |
 | Suppliers: purchase ledger, pay, reverse, correct | ✓ | ✓ | — (records a delivery and its invoice amount) |
-| Users | ✓ | ✓ (not Admins) | — |
+| Users, and reset codes for people who forgot their password | ✓ | ✓ (not Admins) | — |
 | Reset test data | ✓ | — | — |
 
 Owners and the Admin confirm each login with an authenticator-app code (AUTH-2). They set it up at their first login, from a QR code. The Admin can switch this off in **Settings → Security**; the demo seed switches it off.
@@ -91,8 +102,8 @@ Owners and the Admin confirm each login with an authenticator-app code (AUTH-2).
 - **Rates are dated.** A bill line starts from the rate in force on the *bill's* date. The first time an item is billed on a date, the app asks "still ₹X?". An Entry person's new rate is saved on the bill as typed, marked *rate awaiting approval*, and sent to the Owners. If an Owner rejects it and sets their own rate, the bill is corrected, the difference goes on the customer's ledger as a correction entry, and the old version stays in the bill's history (RATE-1..6, open question 6).
 - **A price for one bill only.** Typing a different rate on a bill line gives that customer this price on this bill *only*; the item's own price is not touched and nobody has to approve it. The line is marked *This bill only · list ₹X*. To really change the item's rate, tap **Change rate** on that line (an Entry person's change goes to the Owners as before) or use the Rates screen. A price typed by an Entry person puts the bill in the Owners' **Review** list as *own price*.
 - **Prices include GST** (the default; **Settings → GST**). The price you type or see on the shelf is what the customer pays: ₹105 at 5% is ₹100 + ₹2.50 CGST + ₹2.50 SGST, and the total never moves from qty × price. Switch it off to have GST added on top instead. Each bill remembers which way it was made, so changing the setting later never re-prices old bills.
-- **Whole-pack items (bori, bag, tin, pouch…).** Set **Sold as** on the product. It is counted in whole packs ("7 bags", "3 bori"), never loose; the kg or litre size is only a label. Each company and pack size is its own product with its own price and stock, grouped by **Item (family)**, e.g. Sooji → Annapurna 25 kg. A **carton** is a larger unit holding a set number of packs ("Carton (12 × 1 L)"); stock then reads "2 × Carton (12 × 1 L) + 6 pouches".
-- **Stock summary** (Inventory → *Stock summary*): stock on any day, laid out like a stock sheet: companies down, items and pack sizes across, grouped by category. Excel export included. Only items with a pack type or an item name appear.
+- **Whole-pack items (bori, bag, tin, pouch…).** When adding a product, answer *What are you adding?* first — **Loose**, **Packet or piece**, or **Bori, bag, tin or pouch** — and the form shows only the fields that apply (the price sits right under the name; bags, boxes, HSN, reorder level and the rest are under *More options*). A bori / bag / tin / pouch item is counted in whole packs ("7 bags", "3 bori"), never loose; the kg or litre size is only a label. Each company and pack size is its own product with its own price and stock, grouped by **Item group**, e.g. Sooji → Annapurna 25 kg. Fill in the company, pack size and item group and the name builds itself. A **carton** is a larger unit holding a set number of packs ("Carton (12 × 1 L)"); stock then reads "2 × Carton (12 × 1 L) + 6 pouches".
+- **Stock summary** (Inventory → *Stock summary*): stock on any day, laid out like a stock sheet: companies down, items and pack sizes across, grouped by category. Excel export included. Only items with a pack type or an item group appear.
 - **Purchase ledger** (Ledger → *Suppliers · Purchase*): a stock in with a supplier name puts the invoice amount on what you owe them; the part you pay now comes off it. Pay later in any mix of modes, reverse a wrong payment (both rows stay), or add a correction for a wrong invoice. Filters: name, phone or area; only dues; unpaid 30/60/90+ days; and, inside a supplier, dates, purchases or payments, and payment mode. Prices include GST, so purchases are just amounts.
 - **GST** is worked out per line and split into equal CGST and SGST, rounded to the paisa per line. The total is rounded to the rupee and the round-off is shown. The PRD's example (₹900 taxable → CGST ₹15.50 + SGST ₹15.50 → ₹931) is a test.
   - A kaccha slip has the same total and GST as a tax invoice; it only prints differently.
@@ -105,7 +116,7 @@ Owners and the Admin confirm each login with an authenticator-app code (AUTH-2).
 
 Release 1 **Must** items, all built:
 
-- **Access:** login, roles, user management (AUTH-1..4).
+- **Access:** login, roles, user management, forgot password (AUTH-1..4).
 - **Catalogue:** category tree, products, packs, loose and packed items, aliases (CAT-1..5).
 - **Units and bags:** UNIT-1..5.
 - **Search:** SRCH-1..6 and SRCH-8.
@@ -125,7 +136,6 @@ Release 1 **Must** items, all built:
 
 | Item | Note |
 | --- | --- |
-| Password reset by email (part of AUTH-1) | Needs an email service; the pilot is offline. The Admin or an Owner resets passwords in **Users**. |
 | Entry-person edit window (AUTH-6, open question 7) | Owners correct entries by cancelling and re-entering. Next step: allow edits to one's own bill for the window in Settings (default 60 min). |
 | Category merge, category chips on New Bill, voice search, photos | CAT-6 (merge part), SRCH-7, SRCH-9, CAT-8 |
 | Physical count mode, theft attachments | STK-6, LOSS-4 |

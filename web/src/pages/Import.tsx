@@ -23,7 +23,8 @@ interface Preview {
 
 const COLUMNS: Record<Kind, { key: string; label: string }[]> = {
   products: [
-    { key: 'category', label: 'Category path' }, { key: 'name', label: 'Product name' }, { key: 'nameHi', label: 'Hindi' }, { key: 'baseUnit', label: 'Base unit' },
+    { key: 'category', label: 'Category path' }, { key: 'name', label: 'Product name' }, { key: 'nameHi', label: 'Hindi' }, { key: 'brand', label: 'Brand' },
+    { key: 'packKind', label: 'Pack type' }, { key: 'packSize', label: 'Pack size' }, { key: 'family', label: 'Item group' }, { key: 'baseUnit', label: 'Base unit' },
     { key: 'units', label: 'Extra units' }, { key: 'price', label: 'Price' }, { key: 'unitPrices', label: 'Unit prices' }, { key: 'gst', label: 'GST %' }, { key: 'hsn', label: 'HSN' },
     { key: 'reorder', label: 'Reorder' }, { key: 'opening', label: 'Opening stock' }, { key: 'aliases', label: 'Aliases' },
   ],
@@ -37,7 +38,7 @@ const STATUS: Record<Row['status'], { label: string; cls: string }> = {
 
 /** Spreadsheet import (IMP-1..8, MIG-1..5). The uploaded file is read and thrown away; only the confirmed rows are saved. */
 export function ImportPage() {
-  const { can, toast, reloadCatalog } = useApp();
+  const { can, toast, reloadCatalog, me } = useApp();
   const kinds = (['products', 'stock', 'customers'] as Kind[]).filter((k) => can(k === 'products' ? 'import.products' : k === 'stock' ? 'import.stock' : 'import.customers'));
   const [kind, setKind] = useState<Kind>(kinds[0] ?? 'stock');
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -118,6 +119,9 @@ export function ImportPage() {
             <button className="btn" onClick={() => download(`/api/import/template/${kind}.csv`)}><Download size={15} /> .csv</button>
           </div>
         </div>
+        {kind === 'products' && !can('catalog.edit') && (
+          <div className="banner info">You can add new items from a file. Items that are already in the list can only be changed by an Owner, so a row for one of them (with a different price, GST or units) will be marked as an error: remove it from the file.</div>
+        )}
         <ol className="muted" style={{ margin: 0, paddingLeft: 18 }}>
           <li>Download the template and fill it in Excel or Google Sheets — or use your own sheet with similar column names.</li>
           <li>Upload it. Every row is checked and marked New, Update or Error. Nothing is saved yet.</li>
@@ -193,7 +197,7 @@ export function ImportPage() {
               <b style={{ fontWeight: 500, textTransform: 'capitalize' }}>{h.kind}</b> <span className="muted">· {h.file_name || 'sheet'} · {h.summary}</span>
               <div className="faint" style={{ fontSize: 12 }}>{h.by} · {dateTimeOf(h.created_at)}</div>
             </div>
-            {h.undone ? <span className="tag neutral">Undone</span> : i === 0 && can('import.undo') ? (
+            {h.undone ? <span className="tag neutral">Undone</span> : i === 0 && (can('import.undo') || (can('import.undo.own') && h.created_by === me?.id)) ? (
               <button className="btn sm" onClick={async () => { if (!confirm('Undo this import? Sales made since stay recorded.')) return; try { await api.post(`/api/imports/${h.id}/undo`); toast('Import undone'); reloadCatalog(); loadHistory(); } catch (e) { toast((e as Error).message, 'error'); } }}>
                 <Undo2 size={14} /> Undo
               </button>

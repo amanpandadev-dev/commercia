@@ -5,11 +5,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AppEnv } from '../lib/core';
 import { HttpError, bad, logActivity, need } from '../lib/core';
-import { FIELDS, commitImport, mapHeaders, previewImport, undoImport, type ImportKind, type RowData } from '../lib/importer';
+import { EXAMPLES, FIELDS, commitImport, mapHeaders, previewImport, undoImport, type ImportKind, type RowData } from '../lib/importer';
 import { readSheet, toCsv } from '../lib/sheets';
 import { getSettings, setSetting, type SchemePeriod } from '../lib/settings';
 import { runBackup, listBackups } from '../lib/backup';
 import { isIsoDate } from '../../shared/dates';
+import { can, type Role } from '../../shared/perms';
 import type { DB } from '../db/schema';
 
 export const admin = new Hono<AppEnv>();
@@ -21,6 +22,9 @@ const permFor: Record<ImportKind, 'import.products' | 'import.stock' | 'import.c
   customers: 'import.customers',
 };
 
+/** A products file from someone who can add items but not edit them may only contain new ones. */
+const addOnly = (user: { role: Role }, kind: ImportKind) => kind === 'products' && !can(user.role, 'catalog.edit');
+
 // ---------- Import templates (IMP-1) ----------
 admin.get('/import/template/:file', async (c) => {
   const m = c.req.param('file').match(/^(products|stock|customers)\.(xlsx|csv)$/);
@@ -28,28 +32,52 @@ admin.get('/import/template/:file', async (c) => {
   const kind = m[1] as ImportKind;
   const fields = FIELDS[kind];
   const title = { products: 'Products', stock: 'Stock deliveries', customers: 'Customer dues' }[kind];
-  const example = kind === 'products'
-    ? [fields.map((f) => f.example), ['', 'Oil > Mustard > Fortune', 'Fortune Mustard Oil 1 L', 'फॉर्च्यून सरसों तेल 1 ली', 'Fortune', 'Mustard', 'pc', 'Box of 12 = 12', '160', 'Box of 12 = 1880', '', '5', '1514', '6', '24', '140', 'sarson, sarso tel']]
-    : [fields.map((f) => f.example)];
+  const examples = EXAMPLES[kind];
+  const rowOf = (e: Record<string, string>) => fields.map((f) => e[f.key] ?? '');
   if (m[2] === 'csv') {
-    return new Response(toCsv([fields.map((f) => f.header), ...example]), {
+    return new Response(toCsv([fields.map((f) => f.header), ...examples.map((e) => rowOf(e.row))]), {
       headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="commercia-${kind}-template.csv"` },
     });
   }
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(title);
-  ws.columns = fields.map((f) => ({ header: f.header + (f.required ? ' *' : ''), key: f.key, width: Math.max(14, f.header.length + 6) }));
-  ws.getRow(1).font = { bold: true };
-  ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDF1EC' } };
-  for (const r of example) ws.addRow(r);
+  ws.columns = fields.map((f) => ({ header: f.header + (f.required ? ' *' : ''), key: f.key, width: Math.max(14, Math.min(34, f.header.length + 8)) }));
+  const head = ws.getRow(1);
+  head.font = { bold: true };
+  head.alignment = { vertical: 'middle', wrapText: true };
+  fields.forEach((f, i) => {
+    const cell = head.getCell(i + 1);
+    // Whole-pack columns are shaded differently, so it is clear they are only for bori / bag / tin / pouch items.
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: f.wholePack ? 'FFFCE3C4' : 'FFDDF1EC' } };
+    cell.note = f.help; // hover a heading to see how to fill the column
+  });
+  for (const e of examples) ws.addRow(rowOf(e.row));
+  ws.getRows(2, examples.length)?.forEach((r) => (r.font = { italic: true, color: { argb: 'FF6B7280' } }));
   ws.views = [{ state: 'frozen', ySplit: 1 }];
+
   const help = wb.addWorksheet('Instructions');
-  help.columns = [{ header: 'Column', width: 30 }, { header: 'Required', width: 10 }, { header: 'How to fill it', width: 90 }];
+  help.columns = [{ header: 'Column', width: 30 }, { header: 'Required', width: 10 }, { header: 'How to fill it', width: 100 }];
   help.getRow(1).font = { bold: true };
+  help.addRow(['Start here', '', 'The grey rows on the first sheet are examples: delete them (or overwrite them) before you upload, or they will be added as real items.']);
+  if (kind === 'products') {
+    help.addRow(['Which columns do I fill?', '', '']);
+    const kinds: [string, string][] = [
+      ['Loose, sold by kg or litre (sugar, dal, oil)', 'Category path, Product name, Base unit = kg or L, Selling price, GST %. Optional: Extra units and their prices if it also comes in bags or tins.'],
+      ['Packet or piece (tea, soap, biscuits)', 'Category path, Product name, Base unit = pc, Selling price, GST %. Optional: Extra units such as Box of 12 = 12.'],
+      ['Bori or Bag, sold WHOLE (one product per company and size)', 'Category path, Product name, Brand, Pack type = Bori or Bag, Pack size, Item group, Selling price of ONE bori / bag, GST %. Leave Base unit empty. Opening stock is the number of bori / bags.'],
+      ['Tin, pouch, jar or bottle (ghee, refined oil), sold whole', 'The same as bori / bag, with Pack type = Tin, Pouch, Jar or Bottle. For cartons add Extra units: Carton (12 × 1 L) = 12.'],
+    ];
+    for (const [k, v] of kinds) help.addRow([k, '', v]);
+    help.addRow(['One product per company and size', '', 'Sooji by two companies in two sizes is FOUR rows: each has its own price and stock. "Item group" (Sooji) is what lines them up in the Stock summary.']);
+    help.addRow([]);
+  }
+  help.addRow(['Every column', '', '']);
   for (const f of fields) help.addRow([f.header, f.required ? 'Yes' : '', f.help]);
   help.addRow([]);
-  help.addRow(['Tip', '', 'Replace the example row with your own. Keep the first row as headers. Hindi text is fine.']);
-  if (kind === 'products') help.addRow(['Tip', '', 'Re-uploading the same file changes nothing. Items are matched by Code, otherwise by Product name.']);
+  help.addRow(['Tip', '', 'Keep the first row as headings. Hindi text is fine (use a normal Unicode Hindi font, not Kruti Dev).']);
+  if (kind === 'products') help.addRow(['Tip', '', 'Uploading the same file again changes nothing. Items are matched by Code, otherwise by Product name.']);
+  if (kind === 'stock') help.addRow(['Tip', '', 'The product names must already exist in Commercia. Upload your products first.']);
+  help.getColumn(3).alignment = { wrapText: true, vertical: 'top' };
   const buf = await wb.xlsx.writeBuffer();
   return new Response(buf as ArrayBuffer, {
     headers: {
@@ -83,15 +111,15 @@ admin.post('/import/preview', async (c) => {
     });
     return d;
   });
-  const preview = await previewImport(c.get('db').k, kind, rows);
+  const preview = await previewImport(c.get('db').k, kind, rows, { newOnly: addOnly(c.get('user'), kind) });
   return c.json({ fileName: file.name, headers: sheet.headers, mapped: map, ...preview });
 });
 
 /** Re-check rows after fixing them in the preview. */
 admin.post('/import/validate', async (c) => {
   const body = z.object({ kind: kindSchema, rows: z.array(z.record(z.string(), z.string())) }).parse(await c.req.json());
-  await need(c, permFor[body.kind]);
-  return c.json(await previewImport(c.get('db').k, body.kind, body.rows));
+  const user = await need(c, permFor[body.kind]);
+  return c.json(await previewImport(c.get('db').k, body.kind, body.rows, { newOnly: addOnly(user, body.kind) }));
 });
 
 admin.post('/import/commit', async (c) => {
@@ -99,7 +127,7 @@ admin.post('/import/commit', async (c) => {
     .object({ kind: kindSchema, rows: z.array(z.record(z.string(), z.string())).min(1), fileName: z.string().default(''), asOf: z.string().optional() })
     .parse(await c.req.json());
   const user = await need(c, permFor[body.kind]);
-  const res = await c.get('db').k.transaction().execute((tx) => commitImport(tx, user, body.kind, body.rows, body.fileName, { asOf: body.asOf }));
+  const res = await c.get('db').k.transaction().execute((tx) => commitImport(tx, user, body.kind, body.rows, body.fileName, { asOf: body.asOf, newOnly: addOnly(user, body.kind) }));
   return c.json(res);
 });
 
@@ -108,7 +136,7 @@ admin.get('/imports', async (c) => {
     .get('db')
     .k.selectFrom('imports as i')
     .leftJoin('users as u', 'u.id', 'i.created_by')
-    .select(['i.id', 'i.kind', 'i.file_name', 'i.summary', 'i.undone', 'i.created_at', 'u.name as by'])
+    .select(['i.id', 'i.kind', 'i.file_name', 'i.summary', 'i.undone', 'i.created_at', 'i.created_by', 'u.name as by'])
     .orderBy('i.id', 'desc')
     .limit(20)
     .execute();
@@ -116,8 +144,15 @@ admin.get('/imports', async (c) => {
 });
 
 admin.post('/imports/:id/undo', async (c) => {
-  const user = await need(c, 'import.undo');
   const id = Number(c.req.param('id'));
+  const me = c.get('user');
+  let user = me;
+  if (!can(me.role, 'import.undo')) {
+    // Everyone may take back their own import; someone else's is an Owner's call (refused and logged).
+    user = await need(c, 'import.undo.own');
+    const imp = await c.get('db').k.selectFrom('imports').select('created_by').where('id', '=', id).executeTakeFirst();
+    if (!imp || imp.created_by !== me.id) await need(c, 'import.undo');
+  }
   await c.get('db').k.transaction().execute((tx) => undoImport(tx, user, id));
   return c.json({ ok: true });
 });

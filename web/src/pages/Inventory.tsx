@@ -65,7 +65,7 @@ export function Inventory() {
         <div className="grow" />
         <button className="btn" onClick={exportList} title={t('Export to Excel')}><Download size={16} /><span className="hide-sm">Excel</span></button>
         {can('catalog.edit') && <button className="btn" onClick={() => setCats(true)}><FolderTree size={16} /><span className="hide-sm">{t('Categories')}</span></button>}
-        {can('catalog.edit') && <button className="btn primary" onClick={() => setAdding(true)}><Plus size={16} /> {t('Add Product')}</button>}
+        {can('catalog.add') && <button className="btn primary" onClick={() => setAdding(true)}><Plus size={16} /> {t('Add Product')}</button>}
       </div>
       <div className="row wrap gap-4">
         <button className={`chip ${filter === 'all' ? 'on' : ''}`} onClick={() => setFilter('all')}>{t('All')} · {products.length}</button>
@@ -197,7 +197,7 @@ function StockSummary() {
           </table>
         </div>
       )}
-      <div className="faint" style={{ padding: '8px 16px', fontSize: 12 }}>Counted from the stock records up to the end of {asOf}. Blank means the company doesn't sell that item. Items without a pack type or an item name stay in the product list.</div>
+      <div className="faint" style={{ padding: '8px 16px', fontSize: 12 }}>Counted from the stock records up to the end of {asOf}. Blank means the company doesn't sell that item. Items without a pack type or an item group stay in the product list.</div>
     </div>
   );
 }

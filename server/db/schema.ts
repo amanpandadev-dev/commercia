@@ -339,6 +339,24 @@ export interface SupplierLedgerTable {
   created_at: string;
 }
 
+/**
+ * Forgotten passwords. A row is either a request waiting for an Owner (kind 'owner', no code yet)
+ * or a one-time code, emailed (kind 'email') or issued by an Owner. Only a hash of the code is kept.
+ */
+export interface PasswordResetsTable {
+  id: Generated<number>;
+  user_id: number;
+  kind: 'email' | 'owner';
+  code_hash: string | null;
+  requested_at: string;
+  issued_at: string | null;
+  issued_by: number | null;
+  expires_at: string | null;
+  attempts: number;
+  used_at: string | null;
+  dismissed: number;
+}
+
 export interface ActivityTable {
   id: Generated<number>;
   user_id: number | null;
@@ -400,6 +418,7 @@ export interface DB {
   cash_outs: CashOutsTable;
   suppliers: SuppliersTable;
   supplier_ledger: SupplierLedgerTable;
+  password_resets: PasswordResetsTable;
   activity: ActivityTable;
   versions: VersionsTable;
   imports: ImportsTable;
