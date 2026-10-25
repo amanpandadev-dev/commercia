@@ -329,3 +329,12 @@ table.table { width: 100%; border-collapse: collapse; }
   .no-print { display: none !important; }
   @page { margin: 10mm; }
 }
+
+/* Add Product: "what are you adding?" choices, and the folded-away extras */
+.choice-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.choice { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 12px; background: var(--surface, #fff); color: inherit; cursor: pointer; font: inherit; }
+.choice span { font-size: 12px; color: var(--muted); }
+.choice:hover { border-color: var(--brand); }
+.choice.on { border-color: var(--brand); background: var(--accent-soft); }
+.choice.on b { color: var(--accent-text); }
+details.more > summary { cursor: pointer; font-weight: 500; color: var(--accent-text); padding: 6px 0; }

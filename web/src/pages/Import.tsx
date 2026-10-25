@@ -23,7 +23,8 @@ interface Preview {
 
 const COLUMNS: Record<Kind, { key: string; label: string }[]> = {
   products: [
-    { key: 'category', label: 'Category path' }, { key: 'name', label: 'Product name' }, { key: 'nameHi', label: 'Hindi' }, { key: 'baseUnit', label: 'Base unit' },
+    { key: 'category', label: 'Category path' }, { key: 'name', label: 'Product name' }, { key: 'nameHi', label: 'Hindi' }, { key: 'brand', label: 'Brand' },
+    { key: 'packKind', label: 'Pack type' }, { key: 'packSize', label: 'Pack size' }, { key: 'family', label: 'Item group' }, { key: 'baseUnit', label: 'Base unit' },
     { key: 'units', label: 'Extra units' }, { key: 'price', label: 'Price' }, { key: 'unitPrices', label: 'Unit prices' }, { key: 'gst', label: 'GST %' }, { key: 'hsn', label: 'HSN' },
     { key: 'reorder', label: 'Reorder' }, { key: 'opening', label: 'Opening stock' }, { key: 'aliases', label: 'Aliases' },
   ],

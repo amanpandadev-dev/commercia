@@ -197,7 +197,7 @@ function StockSummary() {
           </table>
         </div>
       )}
-      <div className="faint" style={{ padding: '8px 16px', fontSize: 12 }}>Counted from the stock records up to the end of {asOf}. Blank means the company doesn't sell that item. Items without a pack type or an item name stay in the product list.</div>
+      <div className="faint" style={{ padding: '8px 16px', fontSize: 12 }}>Counted from the stock records up to the end of {asOf}. Blank means the company doesn't sell that item. Items without a pack type or an item group stay in the product list.</div>
     </div>
   );
 }

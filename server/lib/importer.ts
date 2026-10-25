@@ -17,49 +17,78 @@ interface FieldDef {
   header: string;
   required?: boolean;
   aliases: string[];
-  example: string;
   help: string;
+  /** Columns that only matter for whole-pack items (bori, bag, tin…): shaded in the template. */
+  wholePack?: boolean;
 }
 
 export const FIELDS: Record<ImportKind, FieldDef[]> = {
   products: [
-    { key: 'code', header: 'Code', aliases: ['code', 'item code', 'sku', 'barcode'], example: 'SUG-01', help: 'Optional. Your own item code; used to match items on re-import.' },
-    { key: 'category', header: 'Category path', required: true, aliases: ['category path', 'category', 'group'], example: 'Sugar > Loose', help: 'Levels separated by ">" e.g. Oil > Saffola > Sunflower. Missing categories are created.' },
-    { key: 'name', header: 'Product name', required: true, aliases: ['product name', 'product', 'item', 'item name', 'name'], example: 'Sugar', help: 'English name, including pack size if it has one (Tea 250g).' },
-    { key: 'nameHi', header: 'Hindi name', aliases: ['hindi name', 'hindi', 'naam'], example: 'चीनी', help: 'Optional.' },
-    { key: 'brand', header: 'Brand', aliases: ['brand', 'company'], example: '', help: 'Optional.' },
-    { key: 'type', header: 'Type', aliases: ['type', 'variety'], example: '', help: 'Optional, e.g. mustard, sunflower.' },
-    { key: 'family', header: 'Item (family)', aliases: ['item family', 'family', 'item group'], example: 'Sooji', help: 'Optional. The item a pack size belongs to, so brands line up in the stock summary.' },
-    { key: 'packKind', header: 'Pack type', aliases: ['pack type', 'packing', 'pack kind'], example: '', help: 'Optional. Bori, Bag, Tin, Jar, Pouch, Bottle or Pack for items sold only whole (base unit is then pc).' },
-    { key: 'packSize', header: 'Pack size', aliases: ['pack size', 'size', 'weight'], example: '', help: 'Optional label, e.g. 25 kg or 1 L.' },
-    { key: 'baseUnit', header: 'Base unit', required: true, aliases: ['base unit', 'unit', 'uom'], example: 'kg', help: 'kg, L or pc. Stock is counted in this unit.' },
-    { key: 'units', header: 'Extra units', aliases: ['extra units', 'bags', 'pack sizes'], example: 'Bag 50 kg = 50; Bag 25 kg = 25', help: 'Optional. Name = how many base units it holds, separated by ";".' },
-    { key: 'price', header: 'Selling price per unit', required: true, aliases: ['selling price per unit', 'selling price', 'price', 'rate', 'mrp', 'sale price'], example: '45', help: 'Price of one base unit, before GST.' },
-    { key: 'unitPrices', header: 'Extra unit prices', aliases: ['extra unit prices', 'bag prices', 'unit prices'], example: 'Bag 50 kg = 2150; Bag 25 kg = 1090', help: 'Optional. Own price for each extra unit, before GST.' },
-    { key: 'wholesale', header: 'Wholesale price per unit', aliases: ['wholesale price per unit', 'wholesale price', 'wholesale'], example: '43', help: 'Optional. Base unit price for wholesale customers.' },
-    { key: 'gst', header: 'GST %', required: true, aliases: ['gst %', 'gst', 'gst rate', 'tax', 'tax %'], example: '5', help: '0, 5, 12, 18 or 28 (whatever your accountant says).' },
-    { key: 'hsn', header: 'HSN code', aliases: ['hsn code', 'hsn'], example: '1701', help: 'Optional, shown on bills and the GST summary.' },
-    { key: 'reorder', header: 'Reorder level', aliases: ['reorder level', 'reorder', 'min stock', 'minimum'], example: '2 Bag 50 kg', help: 'Optional. Quantity and unit, e.g. "20 Bag 50 kg" or "10" (base unit).' },
-    { key: 'opening', header: 'Opening stock', aliases: ['opening stock', 'stock', 'qty', 'quantity', 'current stock'], example: '12 Bag 50 kg', help: 'Optional, new items only. Quantity and unit, e.g. "12 Bag 50 kg" or "607".' },
-    { key: 'cost', header: 'Purchase rate per base unit', aliases: ['purchase rate per base unit', 'purchase rate', 'cost', 'cost price', 'purchase price'], example: '40', help: 'Optional. Used to value opening stock and losses.' },
-    { key: 'aliases', header: 'Aliases', aliases: ['aliases', 'other names', 'search names'], example: 'chini, cheeni', help: 'Optional. Other spellings people type, separated by commas.' },
+    { key: 'category', header: 'Category path', required: true, aliases: ['category path', 'category', 'group'], help: 'Where it sits in the shop. Levels are separated by ">", e.g. Sugar > Loose, Oil > Fortune, Bori. Categories that do not exist yet are created.' },
+    { key: 'name', header: 'Product name', required: true, aliases: ['product name', 'product', 'item', 'item name', 'name'], help: 'The name staff will search for, in English. For packed items include the company and size: "Sooji — Annapurna 25 kg", "Tea 250g".' },
+    { key: 'nameHi', header: 'Hindi name', aliases: ['hindi name', 'hindi', 'naam'], help: 'Optional. Type it in Hindi (Unicode). Text typed in an old Kruti Dev font will not show correctly.' },
+    { key: 'brand', header: 'Brand', aliases: ['brand', 'company'], help: 'The company. For bori / bag / tin / pouch items, fill it in: each company gets its own row in the Stock summary.' },
+    { key: 'packKind', header: 'Pack type', wholePack: true, aliases: ['pack type', 'packing', 'pack kind'], help: 'ONLY for items sold whole, never loose: Bori, Bag, Tin, Jar, Pouch, Bottle or Pack. Leave empty for loose items and ordinary packets.' },
+    { key: 'packSize', header: 'Pack size', wholePack: true, aliases: ['pack size', 'size', 'weight'], help: 'ONLY for whole-pack items: the size as a label, e.g. 50 kg, 25 kg, 1 L, 500 ml. It does not change how stock is counted.' },
+    { key: 'family', header: 'Item group', wholePack: true, aliases: ['item group', 'item family', 'item (family)', 'family'], help: 'ONLY for whole-pack items: the plain item the pack belongs to, e.g. Sooji, Sugar, Ghee, Refined Oil. Packs of one item line up under one heading in the Stock summary.' },
+    { key: 'baseUnit', header: 'Base unit', aliases: ['base unit', 'unit', 'uom'], help: 'kg or L for loose items, pc for packets. Leave EMPTY when Pack type is filled in (those are counted in packs).' },
+    { key: 'units', header: 'Extra units', aliases: ['extra units', 'bags', 'pack sizes'], help: 'Optional bigger units, written "Name = how many base units" and separated by ";". Examples: Bag 50 kg = 50 (kg items), Box of 12 = 12 (packets), Carton (12 × 1 L) = 12 (pouches).' },
+    { key: 'price', header: 'Selling price per unit', required: true, aliases: ['selling price per unit', 'selling price', 'price', 'rate', 'mrp', 'sale price'], help: 'The shelf price of ONE base unit: one kg, one packet, or one bori / bag / pouch. GST is included unless you turned that off in Settings.' },
+    { key: 'unitPrices', header: 'Extra unit prices', aliases: ['extra unit prices', 'bag prices', 'unit prices'], help: 'Optional. Own price for each extra unit, written like Extra units: Bag 50 kg = 2150; Box of 12 = 1500.' },
+    { key: 'wholesale', header: 'Wholesale price per unit', aliases: ['wholesale price per unit', 'wholesale price', 'wholesale'], help: 'Optional. Price of one base unit for wholesale customers.' },
+    { key: 'gst', header: 'GST %', required: true, aliases: ['gst %', 'gst', 'gst rate', 'tax', 'tax %'], help: '0, 5, 12, 18 or 28 (whatever your accountant says).' },
+    { key: 'hsn', header: 'HSN code', aliases: ['hsn code', 'hsn'], help: 'Optional, shown on bills and the GST summary.' },
+    { key: 'reorder', header: 'Reorder level', aliases: ['reorder level', 'reorder', 'min stock', 'minimum'], help: 'Optional. Quantity and unit, e.g. "20 Bag 50 kg"; or just "10" for the base unit (packs, for bori / bag items).' },
+    { key: 'opening', header: 'Opening stock', aliases: ['opening stock', 'stock', 'qty', 'quantity', 'current stock'], help: 'Optional, new items only. Quantity and unit, e.g. "12 Bag 50 kg"; or just "607" for the base unit. For bori / bag items just the number of packs, e.g. "6".' },
+    { key: 'cost', header: 'Purchase rate per base unit', aliases: ['purchase rate per base unit', 'purchase rate', 'cost', 'cost price', 'purchase price'], help: 'Optional. What one base unit costs you. Used to value opening stock and losses.' },
+    { key: 'type', header: 'Type', aliases: ['type', 'variety'], help: 'Optional, e.g. mustard, sunflower.' },
+    { key: 'code', header: 'Code', aliases: ['code', 'item code', 'sku', 'barcode'], help: 'Optional. Your own item code; used to match items when you upload again.' },
+    { key: 'aliases', header: 'Aliases', aliases: ['aliases', 'other names', 'search names'], help: 'Optional. Other spellings people type, separated by commas: chini, cheeni.' },
   ],
   stock: [
-    { key: 'date', header: 'Date', required: true, aliases: ['date', 'bill date'], example: istDate(), help: 'YYYY-MM-DD or DD-MM-YYYY.' },
-    { key: 'supplier', header: 'Supplier', aliases: ['supplier', 'vendor', 'party'], example: 'Gupta Traders', help: 'Optional.' },
-    { key: 'product', header: 'Code or Product name', required: true, aliases: ['code or product name', 'product', 'item', 'item name', 'code', 'name'], example: 'Sugar', help: 'Must match an item already in Commercia.' },
-    { key: 'qty', header: 'Quantity', required: true, aliases: ['quantity', 'qty'], example: '10', help: 'How many of the unit below.' },
-    { key: 'unit', header: 'Unit', required: true, aliases: ['unit', 'uom'], example: 'Bag 50 kg', help: 'kg / L / pc or one of the item\'s extra units.' },
-    { key: 'rate', header: 'Purchase rate per unit', required: true, aliases: ['purchase rate per unit', 'purchase rate', 'rate', 'cost', 'price'], example: '2000', help: 'Price paid for one of that unit.' },
+    { key: 'date', header: 'Date', required: true, aliases: ['date', 'bill date'], help: 'YYYY-MM-DD or DD-MM-YYYY.' },
+    { key: 'supplier', header: 'Supplier', aliases: ['supplier', 'vendor', 'party'], help: 'Optional. A new name creates a supplier. Old deliveries are treated as paid, so nothing is added to what you owe.' },
+    { key: 'product', header: 'Code or Product name', required: true, aliases: ['code or product name', 'product', 'item', 'item name', 'code', 'name'], help: 'Must match an item already in Commercia.' },
+    { key: 'qty', header: 'Quantity', required: true, aliases: ['quantity', 'qty'], help: 'How many of the unit below.' },
+    { key: 'unit', header: 'Unit', required: true, aliases: ['unit', 'uom'], help: 'kg / L / pc, one of the item\'s extra units (Bag 50 kg, Carton (12 × 1 L)), or for a bori / bag / tin / pouch item just "bori", "bag"… ' },
+    { key: 'rate', header: 'Purchase rate per unit', required: true, aliases: ['purchase rate per unit', 'purchase rate', 'rate', 'cost', 'price'], help: 'Price paid for ONE of that unit.' },
   ],
   customers: [
-    { key: 'name', header: 'Name', required: true, aliases: ['name', 'customer', 'customer name', 'party'], example: 'Sunita Devi', help: 'Customer name.' },
-    { key: 'amount', header: 'Amount owed', required: true, aliases: ['amount owed', 'amount', 'due', 'balance', 'udhaar', 'baaki'], example: '1250', help: 'What they owe today. Negative = they paid in advance.' },
-    { key: 'nickname', header: 'Nickname', aliases: ['nickname', 'nick'], example: '', help: 'Optional. Tells two people with the same name apart.' },
-    { key: 'phone', header: 'Phone', aliases: ['phone', 'mobile', 'phone number'], example: '', help: 'Optional.' },
-    { key: 'area', header: 'Area', aliases: ['area', 'locality', 'address'], example: '', help: 'Optional.' },
-    { key: 'gstin', header: 'GSTIN', aliases: ['gstin', 'gst no', 'gst number'], example: '', help: 'Optional, for business buyers.' },
-    { key: 'priceList', header: 'Price list', aliases: ['price list', 'customer type'], example: 'retail', help: 'Optional: retail or wholesale.' },
+    { key: 'name', header: 'Name', required: true, aliases: ['name', 'customer', 'customer name', 'party'], help: 'Customer name.' },
+    { key: 'amount', header: 'Amount owed', required: true, aliases: ['amount owed', 'amount', 'due', 'balance', 'udhaar', 'baaki'], help: 'What they owe today. Negative = they paid in advance.' },
+    { key: 'nickname', header: 'Nickname', aliases: ['nickname', 'nick'], help: 'Optional. Tells two people with the same name apart.' },
+    { key: 'phone', header: 'Phone', aliases: ['phone', 'mobile', 'phone number'], help: 'Optional.' },
+    { key: 'area', header: 'Area', aliases: ['area', 'locality', 'address'], help: 'Optional.' },
+    { key: 'gstin', header: 'GSTIN', aliases: ['gstin', 'gst no', 'gst number'], help: 'Optional, for business buyers.' },
+    { key: 'priceList', header: 'Price list', aliases: ['price list', 'customer type'], help: 'Optional: retail or wholesale.' },
+  ],
+};
+
+/**
+ * The rows shown in the downloadable templates. They are real: the tests import them, so a
+ * template can never go out with examples that do not work. Keyed by field, so adding a column
+ * cannot shift them.
+ */
+export const EXAMPLES: Record<ImportKind, { what: string; row: Record<string, string> }[]> = {
+  products: [
+    { what: 'Loose item sold by weight, also in bags', row: { category: 'Sugar > Loose', name: 'Sugar', nameHi: 'चीनी', baseUnit: 'kg', units: 'Bag 50 kg = 50; Bag 25 kg = 25', price: '45', unitPrices: 'Bag 50 kg = 2150; Bag 25 kg = 1090', wholesale: '43', gst: '5', hsn: '1701', reorder: '10', opening: '6 Bag 50 kg', cost: '40', aliases: 'chini, cheeni' } },
+    { what: 'Packet sold singly and by the box', row: { category: 'Tea', name: 'Tea 250g', nameHi: 'चाय', brand: 'Tata', baseUnit: 'pc', units: 'Box of 12 = 12', price: '130', unitPrices: 'Box of 12 = 1500', gst: '5', hsn: '0902', reorder: '8', opening: '4 Box of 12', cost: '112', aliases: 'chai' } },
+    { what: 'Bori: sold whole, one product per company and size', row: { category: 'Bori', name: 'Sugar — Dhampur 50 kg', brand: 'Dhampur', packKind: 'Bori', packSize: '50 kg', family: 'Sugar', price: '2150', gst: '5', opening: '6', cost: '2000' } },
+    { what: 'Bag: sold whole, a different company', row: { category: 'Bag', name: 'Sooji — Annapurna 25 kg', brand: 'Annapurna', packKind: 'Bag', packSize: '25 kg', family: 'Sooji', price: '1150', gst: '5', opening: '8', cost: '1050' } },
+    { what: 'Pouch sold singly and by the carton', row: { category: 'Refined Oil', name: 'Refined Oil — Fortune 1 L', brand: 'Fortune', packKind: 'Pouch', packSize: '1 L', family: 'Refined Oil', units: 'Carton (12 × 1 L) = 12', price: '150', unitPrices: 'Carton (12 × 1 L) = 1740', gst: '5', hsn: '1514', opening: '40', cost: '140' } },
+    { what: 'Tin: sold whole', row: { category: 'Ghee', name: 'Ghee — Amul 15 L', brand: 'Amul', packKind: 'Tin', packSize: '15 L', family: 'Ghee', price: '9100', gst: '5', opening: '2', cost: '8600' } },
+  ],
+  // These refer to the product examples above, so import those first.
+  stock: [
+    { what: 'Loose item, bought by the bag', row: { date: istDate(), supplier: 'Gupta Traders', product: 'Sugar', qty: '10', unit: 'Bag 50 kg', rate: '2000' } },
+    { what: 'Packet, bought by the box', row: { date: istDate(), supplier: 'Gupta Traders', product: 'Tea 250g', qty: '4', unit: 'Box of 12', rate: '1344' } },
+    { what: 'Bori: just say bori', row: { date: istDate(), supplier: 'Dhampur Sugar', product: 'Sugar — Dhampur 50 kg', qty: '6', unit: 'Bori', rate: '2000' } },
+    { what: 'Pouches, bought by the carton', row: { date: istDate(), supplier: 'Fortune Dealer', product: 'Refined Oil — Fortune 1 L', qty: '5', unit: 'Carton (12 × 1 L)', rate: '1680' } },
+  ],
+  customers: [
+    { what: 'A customer who owes money', row: { name: 'Sunita Devi', amount: '1250', phone: '9800004521', area: 'Naka' } },
+    { what: 'Two people with the same name: tell them apart', row: { name: 'Ramesh', amount: '300', nickname: 'Dudhwala', area: 'Chowk' } },
+    { what: 'Paid in advance: negative amount', row: { name: 'Pooja Gupta', amount: '-500', phone: '9721055566' } },
   ],
 };
 
@@ -203,6 +232,27 @@ function parseProductRow(d: RowData, errors: string[]): ParsedProduct | null {
   };
 }
 
+interface UnitRef {
+  id: number;
+  product_id: number;
+  name: string;
+  is_base: number;
+}
+
+/**
+ * The unit a stock row means: its exact name, kg / L / pc, or — for a bori, bag, tin or pouch item —
+ * just the word ("bori", "bags"), which stands for one whole pack.
+ */
+function findUnit(units: UnitRef[], product: { id: number; base_unit: string; pack_kind: string }, word: string): UnitRef | undefined {
+  const w = word.trim().toLowerCase();
+  const own = units.filter((u) => u.product_id === product.id);
+  const exact = own.find((u) => u.name.toLowerCase() === w || BASE_ALIASES[w] === u.name);
+  if (exact) return exact;
+  const kind = PACK_KINDS.find((k) => k.value === product.pack_kind);
+  if (kind && (w === kind.value || w === kind.one || w === kind.many || BASE_ALIASES[w] === 'pc')) return own.find((u) => u.is_base === 1);
+  return undefined;
+}
+
 async function findCategory(tx: Tx, path: string[]): Promise<number | null> {
   const paths = await categoryPaths(tx);
   const want = path.map((p) => p.toLowerCase()).join('>');
@@ -253,8 +303,8 @@ export async function previewImport(tx: Tx, kind: ImportKind, rows: RowData[]) {
       out.push({ rowNo: i + 2, data: rows[i], status: errors.length ? 'error' : status, errors, notes });
     }
   } else if (kind === 'stock') {
-    const products = await tx.selectFrom('products').select(['id', 'code', 'name_en', 'base_unit']).where('active', '=', 1).execute();
-    const units = await tx.selectFrom('product_units').select(['id', 'product_id', 'name']).where('active', '=', 1).execute();
+    const products = await tx.selectFrom('products').select(['id', 'code', 'name_en', 'base_unit', 'pack_kind']).where('active', '=', 1).execute();
+    const units = await tx.selectFrom('product_units').select(['id', 'product_id', 'name', 'is_base']).where('active', '=', 1).execute();
     for (let i = 0; i < rows.length; i++) {
       const d = rows[i];
       const errors: string[] = [];
@@ -268,8 +318,7 @@ export async function previewImport(tx: Tx, kind: ImportKind, rows: RowData[]) {
       const rate = parseRupees(d.rate ?? '');
       if (Number.isNaN(rate) || rate < 0) errors.push(`Bad purchase rate "${d.rate ?? ''}"`);
       if (prod) {
-        const uName = (d.unit ?? '').trim().toLowerCase();
-        const unit = units.find((u) => u.product_id === prod.id && (u.name.toLowerCase() === uName || BASE_ALIASES[uName] === u.name));
+        const unit = findUnit(units, prod, d.unit ?? '');
         if (!unit) errors.push(`"${d.unit ?? ''}" isn't a unit of ${prod.name_en}`);
       }
       out.push({ rowNo: i + 2, data: d, status: errors.length ? 'error' : 'new', errors, notes: [] });
@@ -474,16 +523,15 @@ export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: R
     if (openingLines.length) await saveStockIn(tx, user, { supplier: 'Opening stock', date: today, note: `Import #${imp.id}`, lines: openingLines }, imp.id);
     summary = `${preview.counts.new} new, ${preview.counts.update} updated, ${preview.counts.same} unchanged`;
   } else if (kind === 'stock') {
-    const products = await tx.selectFrom('products').select(['id', 'code', 'name_en']).where('active', '=', 1).execute();
-    const units = await tx.selectFrom('product_units').select(['id', 'product_id', 'name']).where('active', '=', 1).execute();
+    const products = await tx.selectFrom('products').select(['id', 'code', 'name_en', 'base_unit', 'pack_kind']).where('active', '=', 1).execute();
+    const units = await tx.selectFrom('product_units').select(['id', 'product_id', 'name', 'is_base']).where('active', '=', 1).execute();
     const groups = new Map<string, { supplier: string; date: string; lines: { productId: number; unitId: number; qtyMilli: number; ratePaise: number }[] }>();
     for (const r of preview.rows) {
       const d = r.data;
       const date = parseDate(d.date)!;
       const ref = d.product.trim().toLowerCase();
       const prod = products.find((p) => p.code?.toLowerCase() === ref) ?? products.find((p) => p.name_en.toLowerCase() === ref)!;
-      const uName = d.unit.trim().toLowerCase();
-      const unit = units.find((u) => u.product_id === prod.id && (u.name.toLowerCase() === uName || BASE_ALIASES[uName] === u.name))!;
+      const unit = findUnit(units, prod, d.unit)!;
       const key = `${date}|${(d.supplier ?? '').trim()}`;
       const g = groups.get(key) ?? { supplier: (d.supplier ?? '').trim(), date, lines: [] };
       g.lines.push({ productId: prod.id, unitId: unit.id, qtyMilli: parseQty(d.qty), ratePaise: parseRupees(d.rate) });
