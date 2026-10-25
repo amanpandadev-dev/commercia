@@ -7,6 +7,7 @@ import { auth, account, requireAuth, users } from './routes/auth';
 import { catalog } from './routes/catalog';
 import { sales } from './routes/sales';
 import { stock } from './routes/stock';
+import { suppliers } from './routes/suppliers';
 import { reports } from './routes/reports';
 import { admin } from './routes/admin';
 
@@ -39,6 +40,7 @@ export function createApp(db: Db) {
   api.route('/', catalog);
   api.route('/', sales);
   api.route('/', stock);
+  api.route('/', suppliers);
   api.route('/', reports);
   api.route('/', admin);
   app.route('/api', api);

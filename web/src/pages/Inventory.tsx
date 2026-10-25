@@ -6,6 +6,7 @@ import { useApp, type CProduct } from '../state';
 import { Empty, Field, Modal, Seg } from '../components/ui';
 import { ProductForm, categoryOptions } from '../components/ProductForm';
 import { baseUnitOf, productStock, reorderLabel, rs, unitShort, qty, dateTimeOf } from '../format';
+import { istDate } from '../../../shared/dates';
 import { formatRate, parseQty } from '../../../shared/money';
 import { baseLabel } from '../../../shared/units';
 
@@ -17,6 +18,7 @@ export function Inventory() {
   const [adding, setAdding] = useState(params.get('add') === '1');
   const [openId, setOpenId] = useState<number | null>(params.get('id') ? Number(params.get('id')) : null);
   const [cats, setCats] = useState(false);
+  const [view, setView] = useState<'list' | 'summary'>(params.get('view') === 'summary' ? 'summary' : 'list');
 
   useEffect(() => {
     if (params.get('id')) setOpenId(Number(params.get('id')));
@@ -49,9 +51,13 @@ export function Inventory() {
       },
     ]);
 
+  const views = <Seg value={view} onChange={setView} options={[{ value: 'list', label: t('Products') }, { value: 'summary', label: t('Stock summary') }]} />;
+  if (view === 'summary') return <><div className="row wrap">{views}</div><StockSummary /></>;
+
   return (
     <>
       <div className="row wrap">
+        {views}
         <div className="input-wrap grow" style={{ maxWidth: 460, minWidth: 220 }}>
           <Search size={16} />
           <input className="input" placeholder={`${t('Search products…')}${lang === 'en' ? ' / सामान खोजें' : ''}`} value={q} onChange={(e) => setQ(e.target.value)} />
@@ -122,6 +128,80 @@ export function Inventory() {
   );
 }
 
+interface Summary {
+  asOf: string;
+  groups: { name: string; columns: { key: string; label: string }[] }[];
+  rows: { brand: string; cells: Record<string, { qtyMilli: number; label: string }> }[];
+}
+
+/** Stock on one day, laid out like the shop's own sheet: companies down, items and pack sizes across. */
+function StockSummary() {
+  const { t, toast } = useApp();
+  const today = istDate();
+  const [asOf, setAsOf] = useState(today);
+  const [data, setData] = useState<Summary | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.get<Summary>(`/api/reports/stock-summary?asOf=${asOf}`).then((d) => live && setData(d)).catch((e) => toast((e as Error).message, 'error'));
+    return () => {
+      live = false;
+    };
+  }, [asOf, toast]);
+
+  const key = (g: string, c: string) => `${g}\u0000${c}`;
+  const cols = data?.groups.flatMap((g) => g.columns.map((c) => ({ ...c, group: g.name }))) ?? [];
+  const exportSheet = () =>
+    data &&
+    exportExcel(`Stock summary ${data.asOf}`, [
+      {
+        name: 'Stock summary',
+        columns: [{ header: 'Company', key: 'brand' }, ...cols.map((c, i) => ({ header: `${c.group} · ${c.label}`, key: `c${i}` }))],
+        rows: data.rows.map((r) => ({ brand: r.brand, ...Object.fromEntries(cols.map((c, i) => [`c${i}`, r.cells[key(c.group, c.key)]?.label ?? ''])) })),
+      },
+    ]);
+
+  return (
+    <div className="card">
+      <div className="card-head" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <h3>{t('Stock summary')}</h3>
+        <div className="row wrap">
+          <label className="row gap-4"><span className="muted">{t('Stock as on')}</span><input type="date" className="input sm" value={asOf} max={today} onChange={(e) => e.target.value && setAsOf(e.target.value)} /></label>
+          <button className="btn sm" onClick={exportSheet} disabled={!data}><Download size={14} /> Excel</button>
+        </div>
+      </div>
+      {!data ? null : cols.length === 0 ? (
+        <Empty>No products yet.</Empty>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th rowSpan={2}>Company</th>
+                {data.groups.map((g) => <th key={g.name} colSpan={g.columns.length} style={{ textAlign: 'center', borderLeft: '1px solid var(--line)' }}>{g.name}</th>)}
+              </tr>
+              <tr>
+                {cols.map((c, i) => <th key={i} className="right nowrap" style={c === cols.find((x) => x.group === c.group) ? { borderLeft: '1px solid var(--line)' } : undefined}>{c.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.map((r) => (
+                <tr key={r.brand}>
+                  <td className="name"><b>{r.brand}</b></td>
+                  {cols.map((c, i) => {
+                    const cell = r.cells[key(c.group, c.key)];
+                    return <td key={i} className={`right num nowrap ${cell && cell.qtyMilli < 0 ? 'err' : cell && cell.qtyMilli === 0 ? 'faint' : ''}`}>{cell ? cell.label : ''}</td>;
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="faint" style={{ padding: '8px 16px', fontSize: 12 }}>Counted from the stock records up to the end of {asOf}. Blank means the company doesn't sell that item. Items without a pack type or an item name stay in the product list.</div>
+    </div>
+  );
+}
+
 const KIND: Record<string, string> = {
   stock_in: 'Stock in', sale: 'Sale', sale_cancel: 'Sale cancelled', adjustment: 'Adjustment', loss: 'Loss', loss_reversal: 'Goods found', opening: 'Opening', import: 'Import',
 };
@@ -165,7 +245,7 @@ function ProductDetail({ product: p, onClose }: { product: CProduct; onClose: ()
         <div className="card card-pad" style={{ boxShadow: 'none' }}>
           <div className="label-sm">{t('Stock')}</div>
           <div className={`num ${p.low ? 'err' : ''}`} style={{ fontSize: 22, fontWeight: 600, cursor: 'pointer' }} onClick={() => setPlain(!plain)} title="Tap to switch">
-            {plain ? baseLabel(p.baseUnit, p.stockMilli) : productStock(p)}
+            {plain ? baseLabel(p.baseUnit, p.stockMilli, p.packKind) : productStock(p)}
           </div>
           <div className="faint" style={{ fontSize: 12 }}>Reorder at {reorderLabel(p)}</div>
         </div>
@@ -201,8 +281,8 @@ function ProductDetail({ product: p, onClose }: { product: CProduct; onClose: ()
                     {m.unit_qty_milli != null && m.unit && <span className="faint"> · {qty(m.unit_qty_milli)} {m.unit}{m.rate_paise != null ? ` @ ${rs(m.rate_paise)}` : ''}</span>}
                     {m.note && <div className="faint" style={{ fontSize: 12 }}>{m.note}</div>}
                   </td>
-                  <td className={`right num ${m.qty_milli < 0 ? 'err' : ''}`} style={{ color: m.qty_milli > 0 ? 'var(--ok)' : undefined }}>{m.qty_milli > 0 ? '+' : ''}{baseLabel(p.baseUnit, m.qty_milli)}</td>
-                  <td className="right num">{baseLabel(p.baseUnit, m.balance)}</td>
+                  <td className={`right num ${m.qty_milli < 0 ? 'err' : ''}`} style={{ color: m.qty_milli > 0 ? 'var(--ok)' : undefined }}>{m.qty_milli > 0 ? '+' : ''}{baseLabel(p.baseUnit, m.qty_milli, p.packKind)}</td>
+                  <td className="right num">{baseLabel(p.baseUnit, m.balance, p.packKind)}</td>
                   <td className="muted">{m.by}</td>
                 </tr>
               ))}

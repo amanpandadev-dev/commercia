@@ -76,6 +76,8 @@ The server checks permissions on every request, not just the screens (AUTH-3, PI
 | Cancel bills, reverse payments, adjust stock, record losses | ✓ | ✓ | report a shortage only |
 | Edit products, prices, GST, settings | ✓ | ✓ | — |
 | Reports, review, activity log, approvals | ✓ | ✓ | day book only |
+| Stock summary | ✓ | ✓ | ✓ |
+| Suppliers: purchase ledger, pay, reverse, correct | ✓ | ✓ | — (records a delivery and its invoice amount) |
 | Users | ✓ | ✓ (not Admins) | — |
 | Reset test data | ✓ | — | — |
 
@@ -87,6 +89,11 @@ Owners and the Admin confirm each login with an authenticator-app code (AUTH-2).
 - **Stock is never typed in.** It is the sum of movements: deliveries, sales, cancellations, imports, adjustments, losses (STK-2). Each product's history shows the running total.
 - **Units and bags.** Each product counts stock in kg, L or pieces. It can have any number of larger units (Bag 50 kg, Box of 12, Tin 15 L), and each unit has its own price. Selling 2 bags + 7 kg removes 107 kg. Stock shows as "12 × Bag 50 kg + 7 kg".
 - **Rates are dated.** A bill line starts from the rate in force on the *bill's* date. The first time an item is billed on a date, the app asks "still ₹X?". An Entry person's new rate is saved on the bill as typed, marked *rate awaiting approval*, and sent to the Owners. If an Owner rejects it and sets their own rate, the bill is corrected, the difference goes on the customer's ledger as a correction entry, and the old version stays in the bill's history (RATE-1..6, open question 6).
+- **A price for one bill only.** Typing a different rate on a bill line gives that customer this price on this bill *only*; the item's own price is not touched and nobody has to approve it. The line is marked *This bill only · list ₹X*. To really change the item's rate, tap **Change rate** on that line (an Entry person's change goes to the Owners as before) or use the Rates screen. A price typed by an Entry person puts the bill in the Owners' **Review** list as *own price*.
+- **Prices include GST** (the default; **Settings → GST**). The price you type or see on the shelf is what the customer pays: ₹105 at 5% is ₹100 + ₹2.50 CGST + ₹2.50 SGST, and the total never moves from qty × price. Switch it off to have GST added on top instead. Each bill remembers which way it was made, so changing the setting later never re-prices old bills.
+- **Whole-pack items (bori, bag, tin, pouch…).** Set **Sold as** on the product. It is counted in whole packs ("7 bags", "3 bori"), never loose; the kg or litre size is only a label. Each company and pack size is its own product with its own price and stock, grouped by **Item (family)**, e.g. Sooji → Annapurna 25 kg. A **carton** is a larger unit holding a set number of packs ("Carton (12 × 1 L)"); stock then reads "2 × Carton (12 × 1 L) + 6 pouches".
+- **Stock summary** (Inventory → *Stock summary*): stock on any day, laid out like a stock sheet: companies down, items and pack sizes across, grouped by category. Excel export included. Only items with a pack type or an item name appear.
+- **Purchase ledger** (Ledger → *Suppliers · Purchase*): a stock in with a supplier name puts the invoice amount on what you owe them; the part you pay now comes off it. Pay later in any mix of modes, reverse a wrong payment (both rows stay), or add a correction for a wrong invoice. Filters: name, phone or area; only dues; unpaid 30/60/90+ days; and, inside a supplier, dates, purchases or payments, and payment mode. Prices include GST, so purchases are just amounts.
 - **GST** is worked out per line and split into equal CGST and SGST, rounded to the paisa per line. The total is rounded to the rupee and the round-off is shown. The PRD's example (₹900 taxable → CGST ₹15.50 + SGST ₹15.50 → ₹931) is a test.
   - A kaccha slip has the same total and GST as a tax invoice; it only prints differently.
   - A bill with only 0% items prints as a Bill of Supply.
@@ -110,6 +117,7 @@ Release 1 **Must** items, all built:
 - **Dashboard, reports and history:** REP-1..5, HIST-1..3.
 - **Day book:** DAY-1..3.
 - **Settings and pilot:** ADM-1, ADM-3, PILOT-1..6.
+- **Added after the first release:** a price typed for one bill only, GST-inclusive prices, whole-pack items and cartons, the stock summary, suppliers and the purchase ledger.
 
 **Should** and **Could** items also built: sign out everywhere (AUTH-5), rename and move categories (CAT-6), usual buying and selling unit (UNIT-6), repeat a supplier's last delivery (STK-5), loss report and this month's losses (LOSS-5), header matching for your own spreadsheet columns (IMP-8, by common names), paper bill reference, duplicate warning, discount, Bill of Supply (BILL-8..10, BILL-13), dues ageing (LED-7), WhatsApp reminder (LED-8), stock value and Excel export of lists (REP-6, REP-7), version-to-version changes (HIST-4, consecutive versions), price history (HIST-5), payment references (PAY-6, stored and shown), pending-approval badge (RATE-7), day book filters and export (DAY-6, DAY-7), and the reset (PILOT-7).
 
@@ -123,6 +131,7 @@ Release 1 **Must** items, all built:
 | Physical count mode, theft attachments | STK-6, LOSS-4 |
 | Remembering a custom column mapping; old `.xls` files | IMP-8 (custom part). `.xls` asks the user to save as `.xlsx`. |
 | Bulk GST update, IGST, composition quarterly summary | GST-4. GST-5 was left out per open question 4. GST-6 is partial: the Bill of Supply declaration prints. |
+| Kruti Dev conversion; supplier opening-dues import; purchase returns; supplier statement printing | The shop's old sheet uses the Kruti Dev font, which must be converted to Unicode first. Supplier dues are typed in per supplier. |
 | Cheque status, bank checking, mode-mix chart | PAY-7, PAY-9, PAY-8 (the `/api/reports/mode-mix` data exists; there is no chart yet) |
 | Cash count and close the day | DAY-4, DAY-5 |
 | Monthly profit, restore old versions, rate trend chart | REP-8, HIST-6, RATE-8 (the history list exists) |

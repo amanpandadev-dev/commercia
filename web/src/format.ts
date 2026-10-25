@@ -12,7 +12,7 @@ export const rsShort = (p: number) => {
 };
 export const qty = formatQty;
 
-export const productStock = (p: CProduct) => stockLabel(p.stockMilli, p.baseUnit, p.units);
+export const productStock = (p: CProduct) => stockLabel(p.stockMilli, p.baseUnit, p.units, p.packKind);
 export const baseUnitOf = (p: CProduct) => p.units.find((u) => u.isBase) ?? p.units[0];
 export const unitById = (p: CProduct, id: number | null | undefined) => p.units.find((u) => u.id === id);
 
@@ -20,11 +20,12 @@ export const unitById = (p: CProduct, id: number | null | undefined) => p.units.
 export function reorderLabel(p: CProduct): string {
   if (p.reorderMilli == null) return '—';
   const u = unitById(p, p.reorderUnitId) ?? baseUnitOf(p);
-  return `${formatQty(Math.round((p.reorderMilli * 1000) / u.factorMilli))} ${u.isBase ? shortBase(p.baseUnit) : u.name}`;
+  return `${formatQty(Math.round((p.reorderMilli * 1000) / u.factorMilli))} ${u.isBase && !p.packKind ? shortBase(p.baseUnit) : u.name}`;
 }
 export const shortBase = (b: string) => (b === 'pc' ? 'pcs' : b);
 export const priceFor = (u: CUnit, list: 'retail' | 'wholesale') => (list === 'wholesale' ? (u.wholesale ?? u.retail) : u.retail);
-export const unitShort = (u: CUnit, p: CProduct) => (u.isBase ? shortBase(p.baseUnit).replace('pcs', 'pc') : u.name);
+// Whole-pack items keep the pack's own name ('Bag 25 kg'); other base units read kg, L or pc.
+export const unitShort = (u: CUnit, p: CProduct) => (u.isBase && !p.packKind ? shortBase(p.baseUnit).replace('pcs', 'pc') : u.name);
 
 const COLORS = ['#0e7a6e', '#f08a24', '#7b5bd6', '#3466c2', '#d14d72', '#2f9e5c', '#b8721d', '#1f8fa6', '#6a7a2b'];
 export function avatarColor(name: string) {

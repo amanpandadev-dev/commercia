@@ -97,6 +97,9 @@ const productSchema = z.object({
   nameHi: z.string().trim().default(''),
   brand: z.string().trim().default(''),
   type: z.string().trim().default(''),
+  family: z.string().trim().default(''),
+  packSize: z.string().trim().default(''),
+  packKind: z.enum(['', 'bori', 'bag', 'tin', 'jar', 'pouch', 'bottle', 'pack']).default(''),
   hsn: z.string().trim().default(''),
   gstBp: z.number().int().min(0).max(4000),
   gstFrom: z.string().optional(),
@@ -117,6 +120,8 @@ type ProductInput = z.infer<typeof productSchema>;
 
 
 async function writeProduct(tx: Tx, user: User, body: ProductInput, existingId?: number): Promise<number> {
+  // A whole-pack item is counted in packs: one base unit, never sold loose.
+  if (body.packKind && (body.baseUnit !== 'pc' || body.loose)) throw bad('A bori, bag or tin item is counted in packs: base unit pc, not sold loose');
   const bases = body.units.filter((u) => u.isBase);
   if (bases.length !== 1 || bases[0].factorMilli !== 1000) throw bad('Exactly one base unit with size 1 is needed');
   const names = body.units.map((u) => u.name.toLowerCase());
@@ -135,6 +140,9 @@ async function writeProduct(tx: Tx, user: User, body: ProductInput, existingId?:
     name_hi: body.nameHi,
     brand: body.brand,
     type: body.type,
+    family: body.family,
+    pack_size: body.packSize,
+    pack_kind: body.packKind,
     hsn: body.hsn,
     base_unit: body.baseUnit,
     loose: body.loose ? 1 : 0,

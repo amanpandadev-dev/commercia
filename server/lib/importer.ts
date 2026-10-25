@@ -6,7 +6,7 @@ import { categoryPaths, customerBalances, gstOn, priceOn, snapshotProduct, stock
 import { ledgerEntry } from './billing';
 import { saveStockIn } from '../routes/stock';
 import { parseRupees, parseQty, formatRupees } from '../../shared/money';
-import { parseExtraUnits, type UnitDef } from '../../shared/units';
+import { PACK_KINDS, packUnitName, parseExtraUnits, type PackKind, type UnitDef } from '../../shared/units';
 import { formatDate, isIsoDate, istDate } from '../../shared/dates';
 import type { User } from '../db/schema';
 
@@ -29,6 +29,9 @@ export const FIELDS: Record<ImportKind, FieldDef[]> = {
     { key: 'nameHi', header: 'Hindi name', aliases: ['hindi name', 'hindi', 'naam'], example: 'चीनी', help: 'Optional.' },
     { key: 'brand', header: 'Brand', aliases: ['brand', 'company'], example: '', help: 'Optional.' },
     { key: 'type', header: 'Type', aliases: ['type', 'variety'], example: '', help: 'Optional, e.g. mustard, sunflower.' },
+    { key: 'family', header: 'Item (family)', aliases: ['item family', 'family', 'item group'], example: 'Sooji', help: 'Optional. The item a pack size belongs to, so brands line up in the stock summary.' },
+    { key: 'packKind', header: 'Pack type', aliases: ['pack type', 'packing', 'pack kind'], example: '', help: 'Optional. Bori, Bag, Tin, Jar, Pouch, Bottle or Pack for items sold only whole (base unit is then pc).' },
+    { key: 'packSize', header: 'Pack size', aliases: ['pack size', 'size', 'weight'], example: '', help: 'Optional label, e.g. 25 kg or 1 L.' },
     { key: 'baseUnit', header: 'Base unit', required: true, aliases: ['base unit', 'unit', 'uom'], example: 'kg', help: 'kg, L or pc. Stock is counted in this unit.' },
     { key: 'units', header: 'Extra units', aliases: ['extra units', 'bags', 'pack sizes'], example: 'Bag 50 kg = 50; Bag 25 kg = 25', help: 'Optional. Name = how many base units it holds, separated by ";".' },
     { key: 'price', header: 'Selling price per unit', required: true, aliases: ['selling price per unit', 'selling price', 'price', 'rate', 'mrp', 'sale price'], example: '45', help: 'Price of one base unit, before GST.' },
@@ -115,6 +118,9 @@ interface ParsedProduct {
   nameHi: string;
   brand: string;
   type: string;
+  family: string;
+  packKind: PackKind;
+  packSize: string;
   baseUnit: 'kg' | 'L' | 'pc';
   units: (UnitDef & { price: number | null })[];
   price: number;
@@ -132,7 +138,11 @@ function parseProductRow(d: RowData, errors: string[]): ParsedProduct | null {
   if (!name) errors.push('Missing product name');
   const path = (d.category ?? '').split(/>|»|\//).map((s) => s.trim()).filter(Boolean);
   if (!path.length) errors.push('Missing category path');
-  const baseUnit = BASE_ALIASES[(d.baseUnit ?? '').trim().toLowerCase()];
+  const kindWord = (d.packKind ?? '').trim().toLowerCase();
+  const packKind = (PACK_KINDS.find((k) => k.value === kindWord || k.one === kindWord || k.many === kindWord)?.value ?? '') as PackKind;
+  if (kindWord && !packKind) errors.push(`Pack type must be one of ${PACK_KINDS.map((k) => k.name).join(', ')} (got "${d.packKind}")`);
+  // Whole-pack items are counted in packs, so their base unit is always pc.
+  const baseUnit = packKind ? 'pc' : BASE_ALIASES[(d.baseUnit ?? '').trim().toLowerCase()];
   if (!baseUnit) errors.push(`Base unit must be kg, L or pc (got "${d.baseUnit ?? ''}")`);
   const price = parseRupees(d.price ?? '');
   if (!d.price?.trim()) errors.push('Missing price');
@@ -177,6 +187,9 @@ function parseProductRow(d: RowData, errors: string[]): ParsedProduct | null {
     nameHi: d.nameHi?.trim() ?? '',
     brand: d.brand?.trim() ?? '',
     type: d.type?.trim() ?? '',
+    family: d.family?.trim() ?? '',
+    packKind,
+    packSize: d.packSize?.trim() ?? '',
     baseUnit,
     units,
     price,
@@ -380,7 +393,7 @@ export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: R
         const row = await tx
           .insertInto('products')
           .values({
-            code: p.code, category_id: parent, name_en: p.name, name_hi: p.nameHi, brand: p.brand, type: p.type, hsn: p.hsn, base_unit: p.baseUnit,
+            code: p.code, category_id: parent, name_en: p.name, name_hi: p.nameHi, brand: p.brand, type: p.type, family: p.family, pack_size: p.packSize, pack_kind: p.packKind, hsn: p.hsn, base_unit: p.baseUnit,
             loose: p.baseUnit === 'pc' ? 0 : 1, step_milli: p.baseUnit === 'pc' ? 1000 : 250, reorder_milli: null, reorder_unit_id: null, aliases: p.aliases,
             buy_unit_id: null, sell_unit_id: null, active: 1, created_at: now, updated_at: now,
           })
@@ -393,7 +406,7 @@ export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: R
         undo.updatedProducts.push({ id: match.id, product: { ...match } });
         await tx
           .updateTable('products')
-          .set({ code: p.code ?? match.code, category_id: parent, name_hi: p.nameHi, brand: p.brand, type: p.type, hsn: p.hsn, aliases: p.aliases, updated_at: now, active: 1 })
+          .set({ code: p.code ?? match.code, category_id: parent, name_hi: p.nameHi, brand: p.brand, type: p.type, family: p.family, pack_size: p.packSize, pack_kind: p.packKind, hsn: p.hsn, aliases: p.aliases, updated_at: now, active: 1 })
           .where('id', '=', productId)
           .execute();
       }
@@ -402,9 +415,10 @@ export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: R
       const unitIds = new Map<string, number>();
       let base = units.find((u) => u.is_base === 1);
       if (!base) {
-        const id = (await tx.insertInto('product_units').values({ product_id: productId, name: p.baseUnit, factor_milli: 1000, is_base: 1, active: 1 }).returning('id').executeTakeFirstOrThrow()).id;
+        const baseName = p.packKind ? packUnitName(p.packKind, p.packSize) : p.baseUnit;
+        const id = (await tx.insertInto('product_units').values({ product_id: productId, name: baseName, factor_milli: 1000, is_base: 1, active: 1 }).returning('id').executeTakeFirstOrThrow()).id;
         undo.addedUnits.push(id);
-        base = { id, product_id: productId, name: p.baseUnit, factor_milli: 1000, is_base: 1, active: 1 };
+        base = { id, product_id: productId, name: baseName, factor_milli: 1000, is_base: 1, active: 1 };
       }
       unitIds.set(base.name.toLowerCase(), base.id);
       unitIds.set(p.baseUnit.toLowerCase(), base.id);

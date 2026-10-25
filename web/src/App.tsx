@@ -49,6 +49,8 @@ export function App() {
             <Route path="/bills" element={<Bills />} />
             <Route path="/bills/:id" element={<Bills />} />
             <Route path="/ledger" element={<Ledger />} />
+            <Route path="/ledger/suppliers" element={<Ledger />} />
+            <Route path="/ledger/suppliers/:id" element={<Ledger />} />
             <Route path="/ledger/:id" element={<Ledger />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/review" element={<Review />} />

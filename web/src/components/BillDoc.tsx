@@ -46,7 +46,9 @@ export function BillDoc({ d, paper }: { d: BillDetail; paper: 'A4' | 'thermal' }
   const showTax = kind === 'tax_invoice' || kind === 'receipt';
   const inclusive = kind === 'kaccha' || kind === 'estimate';
   const title = isEstimate ? 'ESTIMATE — NOT A BILL' : (PRINT_AS_LABEL[kind] ?? 'Bill').toUpperCase();
-  const lineRate = (l: any) => (inclusive ? Math.round((l.rate_paise * (10000 + l.gst_bp)) / 10000) : l.rate_paise);
+  // Bills saved with prices that already contain GST print the rate as typed; older ones add the tax for kaccha slips.
+  const priced = b.gst_inclusive === 1;
+  const lineRate = (l: any) => (inclusive && !priced ? Math.round((l.rate_paise * (10000 + l.gst_bp)) / 10000) : l.rate_paise);
   const lineAmt = (l: any) => (inclusive ? l.taxable_paise + l.cgst_paise + l.sgst_paise : l.amount_paise);
   const parts = d.payments.filter((p) => p.at_billing && !p.reversal_of).flatMap((p) => p.parts);
   const bySlab = new Map<number, { taxable: number; cgst: number; sgst: number }>();
@@ -127,14 +129,14 @@ export function BillDoc({ d, paper }: { d: BillDetail; paper: 'A4' | 'thermal' }
       <table>
         <thead>
           <tr>
-            <th>#</th><th>Item</th>{showTax && <th>HSN</th>}<th className="r">Qty</th><th className="r">Rate</th>{showTax && <th className="r">GST</th>}<th className="r">Amount</th>
+            <th>#</th><th>Item</th>{showTax && <th>HSN</th>}<th className="r">Qty</th><th className="r">Rate{priced && showTax ? " (incl. GST)" : ""}</th>{showTax && <th className="r">GST</th>}<th className="r">Amount</th>
           </tr>
         </thead>
         <tbody>
           {d.lines.map((l, i) => (
             <tr key={l.id}>
               <td>{i + 1}</td>
-              <td>{l.name_en}{l.name_hi && <span style={{ color: '#666' }}> · {l.name_hi}</span>}</td>
+              <td>{l.name_en}{l.name_hi && <span style={{ color: '#666' }}> · {l.name_hi}</span>}{l.price_override === 1 && <span className="no-print tag warn" style={{ marginLeft: 6 }}>own price · list {(l.official_rate_paise / 100).toFixed(2)}</span>}</td>
               {showTax && <td>{l.hsn}</td>}
               <td className="r q">{qty(l.qty_milli)} {l.unit_name}</td>
               <td className="r">{(lineRate(l) / 100).toFixed(2)}</td>

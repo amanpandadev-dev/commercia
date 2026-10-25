@@ -9,6 +9,7 @@ import { computeBill, financialYear } from '../../shared/gst';
 import { toBase } from '../../shared/units';
 import { formatRupees } from '../../shared/money';
 import { isIsoDate } from '../../shared/dates';
+import { can } from '../../shared/perms';
 import type { PayMode, User } from '../db/schema';
 
 export const PAY_MODES = ['cash', 'upi', 'card', 'bank', 'cheque'] as const;
@@ -35,6 +36,8 @@ export const billSchema = z.object({
         unitId: z.number(),
         qtyMilli: z.number().int().positive(),
         ratePaise: z.number().int().nonnegative().optional(),
+        /** True: ratePaise is for this bill only. The item's own price is left alone and no approval is asked. */
+        oneOff: z.boolean().optional(),
       }),
     )
     .min(1, 'Add at least one item'),
@@ -150,12 +153,14 @@ export async function createBill(tx: Tx, user: User, input: BillInput, opts: { f
     const official = (await priceOn(tx, unit.id, list, input.billDate)) ?? 0;
     const rate = l.ratePaise ?? official;
     const gstBp = await gstOn(tx, product.id, input.billDate);
-    resolved.push({ l, unit, product, official, rate, gstBp });
+    resolved.push({ l, unit, product, official, rate, gstBp, oneOff: l.oneOff === true && rate !== official });
   }
+  const oneOffCount = resolved.filter((r) => r.oneOff).length;
 
+  const inclusive = settings.prices_include_gst === '1';
   const totals = computeBill(
     resolved.map((r) => ({ qtyMilli: r.l.qtyMilli, ratePaise: r.rate, gstBp: r.gstBp })),
-    { scheme, kind: input.kind, discount: input.discount ?? null },
+    { scheme, kind: input.kind, discount: input.discount ?? null, inclusive },
   );
 
   const paid = input.estimate ? 0 : input.payments.reduce((a, p) => a + p.amountPaise, 0);
@@ -191,10 +196,12 @@ export async function createBill(tx: Tx, user: User, input: BillInput, opts: { f
       sgst_paise: totals.sgst,
       round_off_paise: totals.roundOff,
       total_paise: totals.total,
+      gst_inclusive: inclusive ? 1 : 0,
       paid_paise: paid,
       credit_paise: credit,
       rate_pending: 0,
-      needs_review: 0,
+      // A price typed by the Entry person is something the Owner should see (REP-4).
+      needs_review: oneOffCount > 0 && !input.estimate && !can(user.role, 'price.set') ? 1 : 0,
       paper_ref: input.paperRef,
       converted_to: null,
       cancel_reason: '',
@@ -232,11 +239,12 @@ export async function createBill(tx: Tx, user: User, input: BillInput, opts: { f
         cgst_paise: t.cgst,
         sgst_paise: t.sgst,
         base_milli: baseMilli,
+        price_override: r.oneOff ? 1 : 0,
       })
       .execute();
     if (input.estimate) continue;
     await addStock(tx, user, r.product.id, -baseMilli, 'sale', bill.id, input.billDate, r.unit.id, r.l.qtyMilli);
-    if (r.rate !== r.official) {
+    if (r.rate !== r.official && !r.oneOff) {
       const res = await changeRate(tx, user, r.unit.id, list, r.rate, input.billDate, 'bill', bill.id);
       if (res === 'requested') ratePending = true;
     }
@@ -278,7 +286,7 @@ export async function createBill(tx: Tx, user: User, input: BillInput, opts: { f
     'create',
     input.estimate ? 'estimate' : 'bill',
     bill.id,
-    `${input.estimate ? 'Estimate' : 'Bill'} ${number} · ${customerName || 'Walk-in'} · ${formatRupees(totals.total)}${credit > 0 ? ` (${formatRupees(credit)} on credit)` : ''}${ratePending ? ' · rate awaiting approval' : ''}`,
+    `${input.estimate ? 'Estimate' : 'Bill'} ${number} · ${customerName || 'Walk-in'} · ${formatRupees(totals.total)}${credit > 0 ? ` (${formatRupees(credit)} on credit)` : ''}${ratePending ? ' · rate awaiting approval' : ''}${oneOffCount ? ` · own price on ${oneOffCount} item${oneOffCount > 1 ? 's' : ''}` : ''}`,
   );
   return { id: bill.id, number, total: totals.total, credit, ratePending };
 }
@@ -363,14 +371,14 @@ export async function correctBillRate(tx: Tx, user: User, billId: number, unitId
   const bill = await tx.selectFrom('bills').selectAll().where('id', '=', billId).executeTakeFirst();
   if (!bill || bill.status !== 'active') return;
   const lines = await tx.selectFrom('bill_lines').selectAll().where('bill_id', '=', billId).orderBy('id').execute();
-  if (!lines.some((l) => l.unit_id === unitId)) return;
+  if (!lines.some((l) => l.unit_id === unitId && !l.price_override)) return;
   const settings = await getSettings(tx);
   const scheme = schemeOn(settings, bill.bill_date);
-  const nextLines = lines.map((l) => (l.unit_id === unitId ? { ...l, rate_paise: newRate } : l));
+  const nextLines = lines.map((l) => (l.unit_id === unitId && !l.price_override ? { ...l, rate_paise: newRate } : l));
   const discount = bill.discount_paise > 0 ? { type: 'amount' as const, value: bill.discount_paise } : null;
   const totals = computeBill(
     nextLines.map((l) => ({ qtyMilli: l.qty_milli, ratePaise: l.rate_paise, gstBp: l.gst_bp })),
-    { scheme, kind: bill.kind, discount },
+    { scheme, kind: bill.kind, discount, inclusive: bill.gst_inclusive === 1 },
   );
   await saveVersion(tx, 'bill', billId, { lines, total: bill.total_paise }, `Before correction: ${reason}`, user.id);
   for (let i = 0; i < nextLines.length; i++) {

@@ -45,11 +45,12 @@ export async function gstOn(tx: Tx, productId: number, date: string): Promise<nu
 }
 
 /** Stock is the sum of movements, never typed in (STK-2). */
-export async function stockMap(tx: Tx, productIds?: number[]): Promise<Map<number, number>> {
+export async function stockMap(tx: Tx, productIds?: number[], asOf?: string): Promise<Map<number, number>> {
   let q = tx
     .selectFrom('stock_movements')
     .select(['product_id', (eb) => eb.fn.sum<number>('qty_milli').as('qty')])
     .groupBy('product_id');
+  if (asOf) q = q.where('date', '<=', asOf);
   if (productIds) {
     if (productIds.length === 0) return new Map();
     q = q.where('product_id', 'in', productIds);
@@ -95,6 +96,9 @@ export interface CatalogProduct {
   nameHi: string;
   brand: string;
   type: string;
+  family: string;
+  packSize: string;
+  packKind: string;
   hsn: string;
   gstBp: number;
   baseUnit: 'kg' | 'L' | 'pc';
@@ -185,6 +189,9 @@ export async function loadCatalog(tx: Tx, date: string, opts: { includeInactive?
       nameHi: p.name_hi,
       brand: p.brand,
       type: p.type,
+      family: p.family,
+      packSize: p.pack_size,
+      packKind: p.pack_kind,
       hsn: p.hsn,
       gstBp: gstMap.get(p.id) ?? 0,
       baseUnit: p.base_unit,

@@ -5,6 +5,7 @@ import { useApp, type CProduct, type Category } from '../state';
 import { Field, Modal } from './ui';
 import { formatQty, parseQty, parseRupees } from '../../../shared/money';
 import { istDate } from '../../../shared/dates';
+import { PACK_KINDS, cartonUnitName, packUnitName, type PackKind } from '../../../shared/units';
 
 interface UnitRow {
   id?: number;
@@ -33,7 +34,7 @@ export function categoryOptions(categories: Category[]) {
 }
 
 export function ProductForm({ product, onClose, onSaved }: { product?: CProduct; onClose: () => void; onSaved: (id: number) => void }) {
-  const { categories, reloadCatalog, toast, t } = useApp();
+  const { categories, reloadCatalog, toast, t, settings } = useApp();
   const editing = !!product;
   const [f, setF] = useState(() => ({
     nameEn: product?.nameEn ?? '',
@@ -42,6 +43,9 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
     categoryId: product?.categoryId ?? null,
     brand: product?.brand ?? '',
     type: product?.type ?? '',
+    family: product?.family ?? '',
+    packSize: product?.packSize ?? '',
+    packKind: (product?.packKind ?? '') as PackKind,
     hsn: product?.hsn ?? '',
     gst: product ? String(product.gstBp / 100) : '5',
     gstFrom: istDate(),
@@ -62,6 +66,7 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
       : [{ name: 'kg', size: '1', retail: '', wholesale: '', isBase: true }],
   );
   const [newCat, setNewCat] = useState('');
+  const [cartonQty, setCartonQty] = useState('12');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const cats = useMemo(() => categoryOptions(categories), [categories]);
@@ -71,6 +76,27 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
     set('baseUnit', b);
     set('loose', b !== 'pc');
     setUnits((us) => us.map((u) => (u.isBase ? { ...u, name: b } : u)));
+  };
+
+  // A bori, bag, tin or pouch is counted in whole packs: base unit pc, never loose, named after the pack.
+  const nameBase = (name: string) => setUnits((us) => us.map((u) => (u.isBase ? { ...u, name } : u)));
+  const setPackKind = (k: PackKind) => {
+    setF((x) => ({ ...x, packKind: k, ...(k ? { baseUnit: 'pc' as const, loose: false } : {}) }));
+    if (k) nameBase(packUnitName(k, f.packSize));
+    else nameBase(f.baseUnit);
+  };
+  const setPackSize = (size: string) => {
+    set('packSize', size);
+    if (f.packKind) nameBase(packUnitName(f.packKind, size));
+  };
+  const suggestedName = [f.family.trim(), f.brand.trim() ? `— ${f.brand.trim()}` : '', f.packSize.trim()].filter(Boolean).join(' ').replace(/^— /, '');
+  const addCarton = () => {
+    const n = Math.round(Number(cartonQty));
+    if (!(n > 1)) return setErr('A carton holds more than 1 pack');
+    const name = cartonUnitName(n, f.packSize);
+    if (units.some((u) => u.name.toLowerCase() === name.toLowerCase())) return setErr(`${name} is already there`);
+    setErr('');
+    setUnits([...units, { name, size: String(n), retail: '', wholesale: '', isBase: false }]);
   };
 
   const save = async () => {
@@ -108,12 +134,15 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
         nameHi: f.nameHi.trim(),
         brand: f.brand.trim(),
         type: f.type.trim(),
+        family: f.family.trim(),
+        packSize: f.packSize.trim(),
+        packKind: f.packKind,
         hsn: f.hsn.trim(),
         gstBp,
         gstFrom: f.gstFrom,
         baseUnit: f.baseUnit,
-        loose: f.loose,
-        stepMilli: f.loose ? Math.max(1, parseQty(f.step) || 1000) : 1000,
+        loose: f.packKind ? false : f.loose,
+        stepMilli: f.loose && !f.packKind ? Math.max(1, parseQty(f.step) || 1000) : 1000,
         reorderQtyMilli: f.reorderQty.trim() ? parseQty(f.reorderQty) : null,
         reorderUnitName: f.reorderQty.trim() ? f.reorderUnit || f.baseUnit : null,
         buyUnitName: f.buyUnit || null,
@@ -162,8 +191,17 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
         <Field label="New category (optional)" hint={f.categoryId ? 'Created under the category chosen above' : undefined}>
           <input className="input" value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="Oil > Saffola" />
         </Field>
-        <Field label="Brand"><input className="input" value={f.brand} onChange={(e) => set('brand', e.target.value)} /></Field>
+        <Field label="Brand / company"><input className="input" value={f.brand} onChange={(e) => set('brand', e.target.value)} /></Field>
         <Field label="Type" hint="e.g. mustard, sunflower, til"><input className="input" value={f.type} onChange={(e) => set('type', e.target.value)} /></Field>
+        <Field label="Sold as" hint={f.packKind ? 'Counted in whole packs, never loose. Each company and pack size is its own product.' : 'Pick bori, bag, tin… for items sold only whole'}>
+          <select className="input" value={f.packKind} onChange={(e) => setPackKind(e.target.value as PackKind)}>
+            <option value="">Ordinary item (loose or packed)</option>
+            {PACK_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Item (family)" hint="Sooji, Refined Oil… lines up the companies in the stock summary"><input className="input" value={f.family} onChange={(e) => set('family', e.target.value)} placeholder="Sooji" /></Field>
+        <Field label="Pack size" hint="Label only: 25 kg, 1 L, 500 ml"><input className="input" value={f.packSize} onChange={(e) => setPackSize(e.target.value)} placeholder="25 kg" /></Field>
+        <div />
         <Field label="Code (optional)"><input className="input" value={f.code} onChange={(e) => set('code', e.target.value)} /></Field>
         <Field label="HSN code"><input className="input" value={f.hsn} onChange={(e) => set('hsn', e.target.value)} inputMode="numeric" /></Field>
         <Field label="GST %">
@@ -180,15 +218,23 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
         ) : <div />}
       </div>
 
+      {suggestedName && suggestedName !== f.nameEn.trim() && (f.family.trim() || f.packKind) && (
+        <div className="row wrap"><span className="muted">Name from the fields above:</span><button type="button" className="chip" onClick={() => set('nameEn', suggestedName)}>Use “{suggestedName}”</button></div>
+      )}
+
       <div className="card card-pad" style={{ boxShadow: 'none' }}>
         <div className="row between wrap mb-8">
-          <b>{t('Units')} &amp; prices <span className="hi">before GST</span></b>
-          <div className="row">
-            <span className="label-sm">{t('Base unit')}</span>
-            <div className="seg">
-              {(['kg', 'L', 'pc'] as const).map((b) => <button key={b} type="button" className={f.baseUnit === b ? 'on' : ''} onClick={() => setBase(b)}>{b}</button>)}
+          <b>{t('Units')} &amp; prices <span className="hi">{settings?.prices_include_gst === '0' ? 'before GST' : 'GST included'}</span></b>
+          {f.packKind ? (
+            <span className="muted">Counted in {PACK_KINDS.find((k) => k.value === f.packKind)?.many}</span>
+          ) : (
+            <div className="row">
+              <span className="label-sm">{t('Base unit')}</span>
+              <div className="seg">
+                {(['kg', 'L', 'pc'] as const).map((b) => <button key={b} type="button" className={f.baseUnit === b ? 'on' : ''} onClick={() => setBase(b)}>{b}</button>)}
+              </div>
             </div>
-          </div>
+          )}
         </div>
         <div className="table-wrap">
           <table className="table">
@@ -211,7 +257,14 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
           {f.baseUnit === 'kg' && ['Bag 50 kg', 'Bag 25 kg', 'Bag 10 kg', 'Bag 5 kg'].filter((n) => !unitNames.includes(n)).map((n) => (
             <button key={n} className="chip" onClick={() => setUnits([...units, { name: n, size: n.match(/\d+/)![0], retail: '', wholesale: '', isBase: false }])}>+ {n}</button>
           ))}
-          {f.baseUnit === 'pc' && !unitNames.includes('Box of 12') && <button className="chip" onClick={() => setUnits([...units, { name: 'Box of 12', size: '12', retail: '', wholesale: '', isBase: false }])}>+ Box of 12</button>}
+          {f.baseUnit === 'pc' && !f.packKind && !unitNames.includes('Box of 12') && <button className="chip" onClick={() => setUnits([...units, { name: 'Box of 12', size: '12', retail: '', wholesale: '', isBase: false }])}>+ Box of 12</button>}
+          {f.baseUnit === 'pc' && (
+            <span className="row gap-4">
+              <span className="muted">Carton holds</span>
+              <input className="input sm num" style={{ width: 64 }} inputMode="numeric" value={cartonQty} onChange={(e) => setCartonQty(e.target.value)} aria-label="Packs in a carton" />
+              <button type="button" className="btn sm" onClick={addCarton}><Plus size={14} /> Carton</button>
+            </span>
+          )}
           {f.baseUnit === 'L' && !unitNames.includes('Tin 15 L') && <button className="chip" onClick={() => setUnits([...units, { name: 'Tin 15 L', size: '15', retail: '', wholesale: '', isBase: false }])}>+ Tin 15 L</button>}
         </div>
         {editing && (
@@ -222,10 +275,12 @@ export function ProductForm({ product, onClose, onSaved }: { product?: CProduct;
       </div>
 
       <div className="grid grid-3">
-        <Field label="Sold loose?">
-          <label className="check"><input type="checkbox" checked={f.loose} onChange={(e) => set('loose', e.target.checked)} /> By weight / volume</label>
-        </Field>
-        {f.loose ? <Field label={`Step (${f.baseUnit})`}><input className="input" value={f.step} onChange={(e) => set('step', e.target.value)} inputMode="decimal" /></Field> : <div />}
+        {f.packKind ? <div /> : (
+          <Field label="Sold loose?">
+            <label className="check"><input type="checkbox" checked={f.loose} onChange={(e) => set('loose', e.target.checked)} /> By weight / volume</label>
+          </Field>
+        )}
+        {f.loose && !f.packKind ? <Field label={`Step (${f.baseUnit})`}><input className="input" value={f.step} onChange={(e) => set('step', e.target.value)} inputMode="decimal" /></Field> : <div />}
         <Field label="Reorder level" hint="Leave empty to switch off">
           <div className="row">
             <input className="input" style={{ width: 90 }} value={f.reorderQty} onChange={(e) => set('reorderQty', e.target.value)} inputMode="decimal" />

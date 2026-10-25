@@ -1,3 +1,4 @@
+import type { PackKind } from '../../shared/units';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { translate, other, type Lang } from './i18n';
@@ -32,6 +33,9 @@ export interface CProduct {
   nameHi: string;
   brand: string;
   type: string;
+  family: string;
+  packSize: string;
+  packKind: PackKind;
   hsn: string;
   gstBp: number;
   baseUnit: 'kg' | 'L' | 'pc';
@@ -66,6 +70,7 @@ export interface Settings {
   prefix_invoice: string;
   prefix_estimate: string;
   gst_schemes: string;
+  prices_include_gst: string;
   composition_pct: string;
   require_2fa: string;
   edit_window_min: string;

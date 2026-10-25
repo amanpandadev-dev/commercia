@@ -35,7 +35,7 @@ const NAV: NavItem[] = [
 ];
 
 const TITLES: Record<string, string> = {
-  '/': 'Dashboard', '/inventory': 'Inventory', '/stock-in': 'Stock In', '/billing': 'New Bill', '/bills': 'Bills', '/ledger': 'Customer Ledger',
+  '/': 'Dashboard', '/inventory': 'Inventory', '/stock-in': 'Stock In', '/billing': 'New Bill', '/bills': 'Bills', '/ledger': 'Ledger',
   '/reports': 'Reports', '/review': 'Review', '/rates': 'Update rates', '/users': 'Users & Activity', '/settings': 'Settings', '/import': 'Import', '/losses': 'Losses',
 };
 

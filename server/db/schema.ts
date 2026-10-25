@@ -57,6 +57,12 @@ export interface ProductsTable {
   step_milli: number;
   reorder_milli: number | null; // in base milli; null = switched off
   reorder_unit_id: number | null; // unit it was entered in, for display
+  /** The item a pack size belongs to (Sooji, Refined Oil): lines packs of different brands up in the stock summary. */
+  family: Generated<string>;
+  /** Label only: '25 kg', '1 L'. */
+  pack_size: Generated<string>;
+  /** '' for ordinary items; bori | bag | tin | jar | pouch | bottle | pack for whole-pack items. */
+  pack_kind: Generated<string>;
   aliases: string;
   buy_unit_id: number | null;
   sell_unit_id: number | null;
@@ -125,6 +131,14 @@ export interface StockInsTable {
   id: Generated<number>;
   supplier: string;
   date: string;
+  /** The supplier's account this delivery went on (null when no supplier was named). */
+  supplier_id: Generated<number | null>;
+  /** The supplier's own invoice number. */
+  invoice_no: Generated<string>;
+  /** What the supplier is owed for this delivery: the invoice amount, as typed (prices include GST). */
+  amount_paise: Generated<number>;
+  /** Paid at the time of the delivery. The rest stayed on credit. */
+  paid_paise: Generated<number>;
   note: string;
   total_paise: number;
   import_id: number | null;
@@ -204,6 +218,8 @@ export interface BillsTable {
   sgst_paise: number;
   round_off_paise: number;
   total_paise: number;
+  /** 1 = the line rates on this bill contain GST (see settings.prices_include_gst when it was saved). */
+  gst_inclusive: Generated<number>;
   paid_paise: number;
   credit_paise: number;
   rate_pending: number;
@@ -237,6 +253,8 @@ export interface BillLinesTable {
   cgst_paise: number;
   sgst_paise: number;
   base_milli: number;
+  /** 1 = a price typed for this bill only; the item's own price was not touched. */
+  price_override: Generated<number>;
 }
 
 export interface PaymentsTable {
@@ -286,6 +304,36 @@ export interface CashOutsTable {
   payee: string;
   mode: PayMode;
   amount_paise: number;
+  note: string;
+  /** Set when the money went to a supplier on the purchase ledger. */
+  supplier_id: Generated<number | null>;
+  stock_in_id: Generated<number | null>;
+  /** A reversal is a second row with a negative amount pointing at the original. */
+  reversal_of: Generated<number | null>;
+  reversed: Generated<number>;
+  created_by: number;
+  created_at: string;
+}
+
+export interface SuppliersTable {
+  id: Generated<number>;
+  name: string;
+  phone: string;
+  area: string;
+  active: number;
+  created_at: string;
+}
+
+/** What we owe each supplier. Append-only like the customer ledger; balance = owed - paid. */
+export interface SupplierLedgerTable {
+  id: Generated<number>;
+  supplier_id: number;
+  date: string;
+  kind: 'opening' | 'purchase' | 'payment' | 'reversal' | 'correction';
+  ref_type: string | null; // stock_in | cash_out
+  ref_id: number | null;
+  owed_paise: number; // adds to what we owe
+  paid_paise: number; // takes away from it
   note: string;
   created_by: number;
   created_at: string;
@@ -350,6 +398,8 @@ export interface DB {
   payment_parts: PaymentPartsTable;
   ledger: LedgerTable;
   cash_outs: CashOutsTable;
+  suppliers: SuppliersTable;
+  supplier_ledger: SupplierLedgerTable;
   activity: ActivityTable;
   versions: VersionsTable;
   imports: ImportsTable;

@@ -139,6 +139,7 @@ admin.patch('/settings', async (c) => {
       prefix_invoice: z.string().min(1).max(8).optional(),
       prefix_estimate: z.string().min(1).max(8).optional(),
       composition_pct: z.string().optional(),
+      prices_include_gst: z.enum(['0', '1']).optional(),
       require_2fa: z.enum(['0', '1']).optional(),
       backup_dir: z.string().optional(),
       default_lang: z.enum(['en', 'hi']).optional(),
@@ -196,7 +197,7 @@ admin.get('/backup/download', async (c) => {
 const TABLES: (keyof DB)[] = [
   'settings', 'users', 'categories', 'products', 'product_units', 'unit_prices', 'product_gst', 'rate_checks', 'rate_requests',
   'stock_ins', 'stock_movements', 'losses', 'loss_lines', 'customers', 'bills', 'bill_lines', 'payments', 'payment_parts',
-  'ledger', 'cash_outs', 'activity', 'versions', 'imports', 'counters',
+  'ledger', 'cash_outs', 'suppliers', 'supplier_ledger', 'activity', 'versions', 'imports', 'counters',
 ];
 export { TABLES };
 
@@ -218,10 +219,11 @@ admin.post('/admin/reset', async (c) => {
   const db = c.get('db');
   const s = await getSettings(db.k);
   if (confirm.trim() !== s.shop_name.trim()) throw new HttpError(400, 'Type the shop name exactly to confirm', 'bad_request');
-  await runBackup(db, 'before-reset');
+  // The pilot keeps a file copy first. On Postgres (Supabase) the nightly backups are the safety net.
+  if (db.dialect === 'sqlite') await runBackup(db, 'before-reset');
   const wipe: (keyof DB)[] = [
     'categories', 'products', 'product_units', 'unit_prices', 'product_gst', 'rate_checks', 'rate_requests', 'stock_ins', 'stock_movements',
-    'losses', 'loss_lines', 'customers', 'bills', 'bill_lines', 'payments', 'payment_parts', 'ledger', 'cash_outs', 'versions', 'imports', 'counters',
+    'losses', 'loss_lines', 'customers', 'bills', 'bill_lines', 'payments', 'payment_parts', 'ledger', 'cash_outs', 'suppliers', 'supplier_ledger', 'versions', 'imports', 'counters',
   ];
   await db.k.transaction().execute(async (tx) => {
     await setSetting(tx, '__allow_purge', '1');
