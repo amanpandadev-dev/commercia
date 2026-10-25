@@ -32,7 +32,7 @@ const catSchema = z.object({
 });
 
 catalog.post('/categories', async (c) => {
-  const user = await need(c, 'catalog.edit');
+  const user = await need(c, 'catalog.add'); // adding a product may need a new category; renaming and moving stay with Owners
   const body = catSchema.parse(await c.req.json());
   const { k } = c.get('db');
   const row = await k
@@ -217,9 +217,12 @@ async function writeProduct(tx: Tx, user: User, body: ProductInput, existingId?:
 }
 
 catalog.post('/products', async (c) => {
-  const user = await need(c, 'catalog.edit');
+  const user = await need(c, 'catalog.add');
   const body = productSchema.parse(await c.req.json());
   const { k } = c.get('db');
+  // Anyone adding items can add the same one twice; the importer matches by name too, so a name is used once.
+  const same = await k.selectFrom('products').select('name_en').where((eb) => eb(eb.fn('lower', ['name_en']), '=', body.nameEn.toLowerCase())).executeTakeFirst();
+  if (same) throw new HttpError(409, `"${same.name_en}" is already in the list. Search for it, or give this one a different name.`, 'conflict');
   const id = await k.transaction().execute(async (tx) => {
     const id = await writeProduct(tx, user, body);
     await versionProduct(tx, id, istDate(), 'Created', user.id);

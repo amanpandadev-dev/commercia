@@ -114,6 +114,27 @@ describe('Commercia API', () => {
     expect(log.some((a: any) => a.action === 'refused' && a.summary.includes('catalog.edit'))).toBe(true);
   });
 
+  it('lets the Entry person add a new product (and a category for it) but not change anything that exists', async () => {
+    const cat = await entry.post('/api/categories', { nameEn: 'Masala' });
+    const made = await entry.post('/api/products', {
+      nameEn: 'Haldi 100g', categoryId: cat.id, gstBp: 500, baseUnit: 'pc', loose: false,
+      units: [{ name: 'pc', factorMilli: 1000, isBase: true, retail: 3500 }],
+    });
+    const p = (await owner.get('/api/catalog')).products.find((x: any) => x.id === made.id);
+    expect(p).toMatchObject({ nameEn: 'Haldi 100g', gstBp: 500 });
+    expect(p.units[0].retail).toBe(3500);
+    const log = await owner.get('/api/activity');
+    expect(log.some((a: any) => a.summary.includes('Added product Haldi 100g') && a.by === 'Amit Kumar')).toBe(true);
+    // The same name twice is refused, whatever the capitalisation.
+    const dup = await entry.req('POST', '/api/products', { nameEn: 'HALDI 100G', gstBp: 500, baseUnit: 'pc', units: [{ name: 'pc', factorMilli: 1000, isBase: true, retail: 3500 }] });
+    expect(dup.status).toBe(409);
+    // Changing the product, its price, or categories is still for Owners.
+    const edit = await entry.req('PATCH', `/api/products/${made.id}`, { nameEn: 'Haldi 100g', gstBp: 500, baseUnit: 'pc', units: [{ ...p.units[0], retail: 1 }] });
+    expect(edit.status).toBe(403);
+    expect((await entry.req('PATCH', `/api/categories/${cat.id}`, { nameEn: 'Renamed' })).status).toBe(403);
+    expect((await entry.req('POST', '/api/import/commit', { kind: 'products', rows: [{ category: 'X', name: 'Imported', baseUnit: 'kg', price: '1', gst: '0' }] })).status).toBe(403); // bulk import stays with Owners
+  });
+
   it("keeps saved bills unchanged when rates change, and routes the Entry person's rate for approval (RATE-1, RATE-5, RATE-6)", async () => {
     const bill = await entry.post('/api/bills', {
       kind: 'receipt', customerId: sunita.id, billDate: today,

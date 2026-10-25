@@ -6,6 +6,7 @@ export type Role = 'admin' | 'owner' | 'entry';
 export const PERMISSIONS = {
   'users.manage': ['admin', 'owner'],
   'settings.edit': ['admin', 'owner'],
+  'catalog.add': ['admin', 'owner', 'entry'], // a new product with its first price; changing one stays with Owners
   'catalog.edit': ['admin', 'owner'],
   'price.set': ['admin', 'owner'],
   'gst.edit': ['admin', 'owner'],

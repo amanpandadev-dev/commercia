@@ -65,7 +65,7 @@ export function Inventory() {
         <div className="grow" />
         <button className="btn" onClick={exportList} title={t('Export to Excel')}><Download size={16} /><span className="hide-sm">Excel</span></button>
         {can('catalog.edit') && <button className="btn" onClick={() => setCats(true)}><FolderTree size={16} /><span className="hide-sm">{t('Categories')}</span></button>}
-        {can('catalog.edit') && <button className="btn primary" onClick={() => setAdding(true)}><Plus size={16} /> {t('Add Product')}</button>}
+        {can('catalog.add') && <button className="btn primary" onClick={() => setAdding(true)}><Plus size={16} /> {t('Add Product')}</button>}
       </div>
       <div className="row wrap gap-4">
         <button className={`chip ${filter === 'all' ? 'on' : ''}`} onClick={() => setFilter('all')}>{t('All')} · {products.length}</button>

@@ -55,7 +55,7 @@ export function Layout({ shopName, children }: { shopName: string; children: Rea
       if (e.key === 'F2' && can('bill.create')) { e.preventDefault(); nav('/billing'); }
       else if (e.key === 'F3' && can('stock.in')) { e.preventDefault(); nav('/stock-in'); }
       else if (e.key === 'F4') { e.preventDefault(); nav('/ledger?pay=1'); }
-      else if (e.key === 'F5' && can('catalog.edit')) { e.preventDefault(); nav('/inventory?add=1'); }
+      else if (e.key === 'F5' && can('catalog.add')) { e.preventDefault(); nav('/inventory?add=1'); }
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);

@@ -152,7 +152,7 @@ export function Dashboard() {
         {can('bill.create') && <QuickAction primary onClick={() => nav('/billing')} icon={<ReceiptText size={18} />} en="New Bill" k="F2" sub={sub} t={t} />}
         {can('stock.in') && <QuickAction onClick={() => nav('/stock-in')} icon={<PackagePlus size={18} />} en="Stock In" k="F3" sub={sub} t={t} />}
         <QuickAction onClick={() => nav('/ledger?pay=1')} icon={<Wallet size={18} />} en="Receive Payment" k="F4" sub={sub} t={t} />
-        {can('catalog.edit') && <QuickAction onClick={() => nav('/inventory?add=1')} icon={<Plus size={18} />} en="Add Product" k="F5" sub={sub} t={t} />}
+        {can('catalog.add') && <QuickAction onClick={() => nav('/inventory?add=1')} icon={<Plus size={18} />} en="Add Product" k="F5" sub={sub} t={t} />}
       </div>
       {d.monthLoss > 0 && can('reports.view') && <div className="muted" style={{ fontSize: 13 }}>Losses recorded this month: {rs(d.monthLoss)} · <Link to="/losses">see losses</Link></div>}
     </>

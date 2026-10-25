@@ -74,7 +74,8 @@ The server checks permissions on every request, not just the screens (AUTH-3, PI
 | Bills, stock in, payments, customers | ✓ | ✓ | ✓ |
 | Change a rate | applies at once | applies at once | sent for approval |
 | Cancel bills, reverse payments, adjust stock, record losses | ✓ | ✓ | report a shortage only |
-| Edit products, prices, GST, settings | ✓ | ✓ | — |
+| Add a new product (with its first price, and a category if needed) | ✓ | ✓ | ✓ |
+| Edit products, prices, GST, categories, settings; import products | ✓ | ✓ | — |
 | Reports, review, activity log, approvals | ✓ | ✓ | day book only |
 | Stock summary | ✓ | ✓ | ✓ |
 | Suppliers: purchase ledger, pay, reverse, correct | ✓ | ✓ | — (records a delivery and its invoice amount) |
