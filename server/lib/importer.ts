@@ -4,8 +4,9 @@ import { HttpError, logActivity, saveVersion } from './core';
 import { nowIso } from '../db/index';
 import { categoryPaths, customerBalances, gstOn, priceOn, snapshotProduct, stockMap } from './catalog';
 import { ledgerEntry } from './billing';
+import { supplierBalances, supplierEntry } from './suppliers';
 import { saveStockIn } from '../routes/stock';
-import { parseRupees, parseQty, formatRupees } from '../../shared/money';
+import { parseRupees, parseQty, formatRupees, roundHalfUp } from '../../shared/money';
 import { LOOSE_WORD, derivePackName, findPackKind, packOf, packUnitName, parseExtraUnits, parsePackSize, type UnitDef } from '../../shared/units';
 import { customPackTypes, getSettings } from './settings';
 import { formatDate, isIsoDate, istDate } from '../../shared/dates';
@@ -50,20 +51,22 @@ export const FIELDS: Record<ImportKind, FieldDef[]> = {
   ],
   stock: [
     { key: 'date', header: 'Date', required: true, aliases: ['date', 'bill date'], help: 'YYYY-MM-DD or DD-MM-YYYY.' },
-    { key: 'supplier', header: 'Supplier', aliases: ['supplier', 'vendor', 'party'], help: 'Optional. A new name creates a supplier. Old deliveries are treated as paid, so nothing is added to what you owe.' },
-    { key: 'product', header: 'Code or Product name', required: true, aliases: ['code or product name', 'product', 'item', 'item name', 'code', 'name'], help: 'Must match an item already in Commercia.' },
-    { key: 'qty', header: 'Quantity', required: true, aliases: ['quantity', 'qty'], help: 'How many of the unit below.' },
-    { key: 'unit', header: 'Unit', required: true, aliases: ['unit', 'uom'], help: 'kg / L / pc, one of the item\'s extra units (Bag 50 kg, Carton (12 × 1 L)), or for a bori / bag / tin / pouch item just "bori", "bag"… ' },
-    { key: 'rate', header: 'Purchase rate per unit', required: true, aliases: ['purchase rate per unit', 'purchase rate', 'rate', 'cost', 'price'], help: 'Price paid for ONE of that unit.' },
+    { key: 'supplier', header: 'Supplier', required: true, aliases: ['supplier', 'vendor', 'party'], help: 'Who you bought it from. A new name creates a supplier. Each supplier and date is one delivery, and its total goes on that supplier\'s purchase ledger.' },
+    { key: 'product', header: 'Code or Product name', required: true, aliases: ['code or product name', 'product', 'item', 'item name', 'code', 'name'], help: 'Pick from the list. Must be an item already in Commercia, like Sugar — Dhampur 50 kg Bori.' },
+    { key: 'qty', header: 'Quantity', required: true, aliases: ['quantity', 'qty'], help: 'How many of the unit next to it: 10 for ten bori. Pick a common number or type your own.' },
+    { key: 'unit', header: 'Unit', required: true, aliases: ['unit', 'uom'], help: 'Pick from the list: Bori, Bag, Can… for a whole pack, or kg / L / pc. A carton or other bigger unit of the item can be typed by name.' },
+    { key: 'rate', header: 'Purchase rate per unit', required: true, aliases: ['purchase rate per unit', 'purchase rate', 'rate', 'cost', 'price'], help: 'Price paid for ONE of that unit (GST included): 1,200 if one bori costs 1,200.' },
+    { key: 'total', header: 'Amount', aliases: ['amount', 'total', 'line total'], help: 'Worked out for you: Quantity × Rate (10 bori at 1,200 = 12,000). Do not type here; whatever is in it is ignored.' },
   ],
   customers: [
-    { key: 'name', header: 'Name', required: true, aliases: ['name', 'customer', 'customer name', 'party'], help: 'Customer name.' },
-    { key: 'amount', header: 'Amount owed', required: true, aliases: ['amount owed', 'amount', 'due', 'balance', 'udhaar', 'baaki'], help: 'What they owe today. Negative = they paid in advance.' },
-    { key: 'nickname', header: 'Nickname', aliases: ['nickname', 'nick'], help: 'Optional. Tells two people with the same name apart.' },
+    { key: 'party', header: 'Type', aliases: ['type', 'party type', 'sale or purchase', 'ledger'], help: 'Sale = a customer who owes you (the sales ledger). Purchase = a supplier you owe (the purchase ledger). Empty means Sale.' },
+    { key: 'name', header: 'Name', required: true, aliases: ['name', 'customer', 'customer name', 'supplier', 'supplier name', 'party'], help: 'The customer\'s name (Sale) or the supplier\'s name (Purchase).' },
+    { key: 'amount', header: 'Amount owed', required: true, aliases: ['amount owed', 'amount', 'due', 'balance', 'udhaar', 'baaki'], help: 'Sale: what the customer owes you today; negative = they paid in advance. Purchase: what you owe the supplier today; negative = you paid them in advance.' },
+    { key: 'nickname', header: 'Nickname', aliases: ['nickname', 'nick'], help: 'Customers only. Optional. Tells two people with the same name apart.' },
     { key: 'phone', header: 'Phone', aliases: ['phone', 'mobile', 'phone number'], help: 'Optional.' },
     { key: 'area', header: 'Area', aliases: ['area', 'locality', 'address'], help: 'Optional.' },
-    { key: 'gstin', header: 'GSTIN', aliases: ['gstin', 'gst no', 'gst number'], help: 'Optional, for business buyers.' },
-    { key: 'priceList', header: 'Price list', aliases: ['price list', 'customer type'], help: 'Optional: retail or wholesale.' },
+    { key: 'gstin', header: 'GSTIN', aliases: ['gstin', 'gst no', 'gst number'], help: 'Customers only. Optional, for business buyers.' },
+    { key: 'priceList', header: 'Price list', aliases: ['price list', 'customer type'], help: 'Customers only. Optional: retail or wholesale.' },
   ],
 };
 
@@ -82,16 +85,18 @@ export const EXAMPLES: Record<ImportKind, { what: string; row: Record<string, st
     { what: 'Packet, size in grams', row: { category: 'Tea', brand: 'Tata', packKind: 'Packet', packSize: '250 g', price: '130', opening: '40', reorder: '10', aliases: 'चाय, chai' } },
     { what: 'Loose: sold by the kg, so the price is for 1 kg and stock is in kg', row: { category: 'Toor Dal', packKind: 'Loose', packSize: '1 kg', price: '140', opening: '25', reorder: '10', aliases: 'अरहर दाल, arhar' } },
   ],
-  // These refer to the product examples above, so import those first.
+  // These refer to the product examples above, so import those first. Amount is Quantity × Rate.
   stock: [
-    { what: 'Bori: just say bori', row: { date: istDate(), supplier: 'Dhampur Sugar', product: 'Sugar — Dhampur 50 kg Bori', qty: '6', unit: 'Bori', rate: '2000' } },
-    { what: 'Pouches', row: { date: istDate(), supplier: 'Fortune Dealer', product: 'Refined Oil — Fortune 1 L Pouch', qty: '24', unit: 'Pouch', rate: '140' } },
-    { what: 'Loose, by the kg', row: { date: istDate(), supplier: 'Gupta Traders', product: 'Toor Dal (loose)', qty: '25', unit: 'kg', rate: '124' } },
+    { what: 'Bori: just say bori. 6 bori at 2,000 each = 12,000', row: { date: istDate(), supplier: 'Dhampur Sugar', product: 'Sugar — Dhampur 50 kg Bori', qty: '6', unit: 'Bori', rate: '2000', total: '12000' } },
+    { what: 'Pouches: 24 at 140 each = 3,360', row: { date: istDate(), supplier: 'Fortune Dealer', product: 'Refined Oil — Fortune 1 L Pouch', qty: '24', unit: 'Pouch', rate: '140', total: '3360' } },
+    { what: 'Loose, by the kg: 25 kg at 124 = 3,100', row: { date: istDate(), supplier: 'Gupta Traders', product: 'Toor Dal (loose)', qty: '25', unit: 'kg', rate: '124', total: '3100' } },
   ],
   customers: [
-    { what: 'A customer who owes money', row: { name: 'Sunita Devi', amount: '1250', phone: '9800004521', area: 'Naka' } },
-    { what: 'Two people with the same name: tell them apart', row: { name: 'Ramesh', amount: '300', nickname: 'Dudhwala', area: 'Chowk' } },
-    { what: 'Paid in advance: negative amount', row: { name: 'Pooja Gupta', amount: '-500', phone: '9721055566' } },
+    { what: 'Sale: a customer who owes money', row: { party: 'Sale', name: 'Sunita Devi', amount: '1250', phone: '9800004521', area: 'Naka' } },
+    { what: 'Sale: two people with the same name, told apart', row: { party: 'Sale', name: 'Ramesh', amount: '300', nickname: 'Dudhwala', area: 'Chowk' } },
+    { what: 'Sale: paid in advance, so a negative amount', row: { party: 'Sale', name: 'Pooja Gupta', amount: '-500', phone: '9721055566' } },
+    { what: 'Purchase: a supplier you owe money', row: { party: 'Purchase', name: 'Annapurna Traders', amount: '38000', phone: '9800001122', area: 'Mandi' } },
+    { what: 'Purchase: a supplier you paid in advance, so a negative amount', row: { party: 'Purchase', name: 'Ravi Oil Mill', amount: '-2000', area: 'Station Road' } },
   ],
 };
 
@@ -344,7 +349,24 @@ function findUnit(units: UnitRef[], product: { id: number; base_unit: string; pa
   if (exact) return exact;
   const kind = packOf(product.pack_kind);
   if (kind && (w === kind.value || w === kind.name.toLowerCase() || w === kind.one || w === kind.many || BASE_ALIASES[w] === 'pc')) return own.find((u) => u.is_base === 1);
-  return undefined;
+  // A bigger unit by its first word: "Carton" for "Carton (12 × 1 L)", if the item has just one such unit.
+  const starts = w ? own.filter((u) => u.is_base !== 1 && u.name.toLowerCase().split(/[\s(]/)[0] === w) : [];
+  return starts.length === 1 ? starts[0] : undefined;
+}
+
+/** Quantity × rate for one row of a stock sheet, in paise. NaN if either is not a number. */
+export function lineTotalPaise(qty: string, rate: string): number {
+  const q = parseQty(qty ?? '');
+  const r = parseRupees(rate ?? '');
+  return Number.isNaN(q) || Number.isNaN(r) ? NaN : roundHalfUp((q * r) / 1000);
+}
+
+/** 'Dues' sheet: Sale (a customer) or Purchase (a supplier). Empty means Sale; null is not a type. */
+export function parseParty(s: string): 'sale' | 'purchase' | null {
+  const w = s.trim().toLowerCase();
+  if (['', 'sale', 'sales', 's', 'customer'].includes(w)) return 'sale';
+  if (['purchase', 'purchases', 'p', 'supplier', 'vendor'].includes(w)) return 'purchase';
+  return null;
 }
 
 async function findCategory(tx: Tx, path: string[]): Promise<number | null> {
@@ -404,10 +426,19 @@ export async function previewImport(tx: Tx, kind: ImportKind, rows: RowData[], o
   } else if (kind === 'stock') {
     const products = await tx.selectFrom('products').select(['id', 'code', 'name_en', 'base_unit', 'pack_kind']).where('active', '=', 1).execute();
     const units = await tx.selectFrom('product_units').select(['id', 'product_id', 'name', 'is_base']).where('active', '=', 1).execute();
+    const known = new Set((await tx.selectFrom('suppliers').select('name').execute()).map((r) => r.name.trim().toLowerCase()));
+    const announced = new Set<string>();
     for (let i = 0; i < rows.length; i++) {
       const d = rows[i];
       const errors: string[] = [];
+      const notes: string[] = [];
       if (!parseDate(d.date ?? '')) errors.push(`Bad date "${d.date ?? ''}"`);
+      const sup = (d.supplier ?? '').trim();
+      if (!sup) errors.push('Missing supplier — every delivery goes on a supplier\'s purchase ledger');
+      else if (!known.has(sup.toLowerCase()) && !announced.has(sup.toLowerCase())) {
+        announced.add(sup.toLowerCase());
+        notes.push(`New supplier "${sup}"`);
+      }
       const ref = (d.product ?? '').trim().toLowerCase();
       const prod = products.find((p) => p.code?.toLowerCase() === ref) ?? products.find((p) => p.name_en.toLowerCase() === ref);
       if (!ref) errors.push('Missing product');
@@ -420,36 +451,56 @@ export async function previewImport(tx: Tx, kind: ImportKind, rows: RowData[], o
         const unit = findUnit(units, prod, d.unit ?? '');
         if (!unit) errors.push(`"${d.unit ?? ''}" isn't a unit of ${prod.name_en}`);
       }
-      out.push({ rowNo: i + 2, data: d, status: errors.length ? 'error' : 'new', errors, notes: [] });
+      // The Amount column is worked out here, never taken from the file.
+      const total = lineTotalPaise(d.qty, d.rate);
+      const data = { ...d, total: Number.isNaN(total) ? '' : (total / 100).toFixed(2) };
+      out.push({ rowNo: i + 2, data, status: errors.length ? 'error' : 'new', errors, notes });
     }
   } else {
     const existing = await tx.selectFrom('customers').select(['id', 'name', 'nickname', 'area', 'phone']).where('active', '=', 1).execute();
+    const suppliers = await tx.selectFrom('suppliers').select(['id', 'name']).where('active', '=', 1).execute();
     const balances = await customerBalances(tx);
-    const key = (d: { name: string; nickname?: string; area?: string }) => `${d.name.trim().toLowerCase()}|${(d.nickname ?? '').trim().toLowerCase()}|${(d.area ?? '').trim().toLowerCase()}`;
+    const owedTo = await supplierBalances(tx);
+    // A customer is told apart by name, nickname and area; a supplier by name. Each ledger has its own.
+    const key = (d: { party?: string; name: string; nickname?: string; area?: string }) =>
+      parseParty(d.party ?? '') === 'purchase' ? `P|${d.name.trim().toLowerCase()}` : `S|${d.name.trim().toLowerCase()}|${(d.nickname ?? '').trim().toLowerCase()}|${(d.area ?? '').trim().toLowerCase()}`;
     const counts = new Map<string, number[]>();
     rows.forEach((d, i) => {
-      const k2 = key({ name: d.name ?? '', nickname: d.nickname, area: d.area });
+      const k2 = key({ ...d, name: d.name ?? '' });
       counts.set(k2, [...(counts.get(k2) ?? []), i + 2]);
     });
     for (let i = 0; i < rows.length; i++) {
       const d = rows[i];
       const errors: string[] = [];
       const notes: string[] = [];
+      const party = parseParty(d.party ?? '');
+      if (!party) errors.push(`Type must be Sale (a customer) or Purchase (a supplier), not "${d.party}"`);
       if (!d.name?.trim()) errors.push('Missing name');
       const amt = parseRupees(d.amount ?? '');
       if (!(d.amount ?? '').trim()) errors.push('Missing amount owed');
       else if (Number.isNaN(amt)) errors.push(`Bad number in amount: "${d.amount}"`);
       if (d.priceList && !['retail', 'wholesale', ''].includes(d.priceList.trim().toLowerCase())) errors.push('Price list must be retail or wholesale');
-      const dupRows = counts.get(key({ name: d.name ?? '', nickname: d.nickname, area: d.area })) ?? [];
+      const dupRows = counts.get(key({ ...d, name: d.name ?? '' })) ?? [];
       // Two "Ramesh" rows can't be saved until they're told apart or merged (MIG-4).
-      if (d.name?.trim() && dupRows.length > 1) errors.push(`Same name as row ${dupRows.filter((r) => r !== i + 2).join(', ')} — add a nickname or area, or merge`);
-      const match = existing.find((e) => key(e) === key({ name: d.name ?? '', nickname: d.nickname, area: d.area }));
+      if (d.name?.trim() && dupRows.length > 1) {
+        errors.push(party === 'purchase' ? `Same supplier as row ${dupRows.filter((r) => r !== i + 2).join(', ')} — merge them into one row` : `Same name as row ${dupRows.filter((r) => r !== i + 2).join(', ')} — add a nickname or area, or merge`);
+      }
       let status: PreviewRow['status'] = 'new';
-      if (match) {
-        const hasOpening = await tx.selectFrom('ledger').select('id').where('customer_id', '=', match.id).where('kind', '=', 'opening').executeTakeFirst();
-        status = 'update';
-        if (hasOpening || (balances.get(match.id) ?? 0) !== 0) notes.push('Already has a balance — only details will be updated');
-      } else if (!Number.isNaN(amt) && amt < 0) notes.push(`Advance ${formatRupees(-amt)}`);
+      if (party === 'purchase') {
+        if ((d.nickname ?? '').trim() || (d.gstin ?? '').trim() || (d.priceList ?? '').trim()) notes.push('Nickname, GSTIN and Price list are for customers; ignored for a supplier');
+        const match = suppliers.find((e) => e.name.trim().toLowerCase() === (d.name ?? '').trim().toLowerCase());
+        if (match) {
+          status = 'update';
+          notes.push(`Already a supplier${owedTo.get(match.id) ? ` (balance ${formatRupees(owedTo.get(match.id)!)})` : ''} — only details will be updated, not the amount`);
+        } else if (!Number.isNaN(amt) && amt < 0) notes.push(`Paid in advance ${formatRupees(-amt)}`);
+      } else {
+        const match = existing.find((e) => key({ ...e, party: 'sale' }) === key({ ...d, name: d.name ?? '' }));
+        if (match) {
+          const hasOpening = await tx.selectFrom('ledger').select('id').where('customer_id', '=', match.id).where('kind', '=', 'opening').executeTakeFirst();
+          status = 'update';
+          if (hasOpening || (balances.get(match.id) ?? 0) !== 0) notes.push('Already has a balance — only details will be updated');
+        } else if (!Number.isNaN(amt) && amt < 0) notes.push(`Advance ${formatRupees(-amt)}`);
+      }
       out.push({ rowNo: i + 2, data: d, status: errors.length ? 'error' : status, errors, notes });
     }
   }
@@ -503,6 +554,9 @@ interface UndoData {
   categories: number[];
   createdCustomers: number[];
   updatedCustomers: { id: number; data: Record<string, unknown> }[];
+  /** Suppliers the import made, and the details of the ones it changed. (Missing in imports made before suppliers.) */
+  createdSuppliers?: number[];
+  updatedSuppliers?: { id: number; data: Record<string, unknown> }[];
 }
 
 /** Saves all rows together, or none if anything fails (IMP-6). */
@@ -514,7 +568,7 @@ export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: R
     .values({ kind, file_name: fileName, summary: '', undone: 0, created_by: user.id, created_at: nowIso() })
     .returning('id')
     .executeTakeFirstOrThrow();
-  const undo: UndoData = { createdProducts: [], updatedProducts: [], addedUnits: [], priceIds: [], gstIds: [], categories: [], createdCustomers: [], updatedCustomers: [] };
+  const undo: UndoData = { createdProducts: [], updatedProducts: [], addedUnits: [], priceIds: [], gstIds: [], categories: [], createdCustomers: [], updatedCustomers: [], createdSuppliers: [], updatedSuppliers: [] };
   const today = istDate();
   const now = nowIso();
   let summary = '';
@@ -630,26 +684,59 @@ export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: R
     const products = await tx.selectFrom('products').select(['id', 'code', 'name_en', 'base_unit', 'pack_kind']).where('active', '=', 1).execute();
     const units = await tx.selectFrom('product_units').select(['id', 'product_id', 'name', 'is_base']).where('active', '=', 1).execute();
     const groups = new Map<string, { supplier: string; date: string; lines: { productId: number; unitId: number; qtyMilli: number; ratePaise: number }[] }>();
+    const firstNewSupplier = ((await tx.selectFrom('suppliers').select((eb) => eb.fn.max('id').as('m')).executeTakeFirst())?.m ?? 0) + 1;
     for (const r of preview.rows) {
       const d = r.data;
       const date = parseDate(d.date)!;
       const ref = d.product.trim().toLowerCase();
       const prod = products.find((p) => p.code?.toLowerCase() === ref) ?? products.find((p) => p.name_en.toLowerCase() === ref)!;
       const unit = findUnit(units, prod, d.unit)!;
-      const key = `${date}|${(d.supplier ?? '').trim()}`;
-      const g = groups.get(key) ?? { supplier: (d.supplier ?? '').trim(), date, lines: [] };
+      const key = `${date}|${d.supplier.trim().toLowerCase()}`;
+      const g = groups.get(key) ?? { supplier: d.supplier.trim(), date, lines: [] };
       g.lines.push({ productId: prod.id, unitId: unit.id, qtyMilli: parseQty(d.qty), ratePaise: parseRupees(d.rate) });
       groups.set(key, g);
     }
-    for (const g of groups.values()) await saveStockIn(tx, user, { supplier: g.supplier, date: g.date, note: `Import #${imp.id}`, lines: g.lines }, imp.id);
-    summary = `${preview.rows.length} lines in ${groups.size} deliveries`;
+    // Each supplier and date is one delivery; its total (Σ quantity × rate) goes on the supplier's purchase ledger.
+    let owed = 0;
+    for (const g of groups.values()) {
+      const res = await saveStockIn(tx, user, { supplier: g.supplier, date: g.date, note: `Import #${imp.id}`, lines: g.lines }, imp.id);
+      owed += res.total;
+    }
+    undo.createdSuppliers = (await tx.selectFrom('suppliers').select('id').where('id', '>=', firstNewSupplier).execute()).map((x) => x.id);
+    summary = `${preview.rows.length} lines in ${groups.size} deliveries · ${formatRupees(owed)} on the purchase ledger`;
   } else {
     const asOf = opts.asOf && isIsoDate(opts.asOf) ? opts.asOf : today;
     const existing = await tx.selectFrom('customers').selectAll().where('active', '=', 1).execute();
+    const suppliers = await tx.selectFrom('suppliers').selectAll().where('active', '=', 1).execute();
     let total = 0;
+    let owedToSuppliers = 0;
     for (const r of preview.rows) {
       const d = r.data;
       const amt = parseRupees(d.amount);
+      if (parseParty(d.party ?? '') === 'purchase') {
+        // Purchase: a supplier and what the shop owes them. Same rule as a customer's opening balance, on the purchase ledger.
+        const name = d.name.trim();
+        const phone = (d.phone ?? '').trim();
+        const area = (d.area ?? '').trim();
+        const match = suppliers.find((e) => e.name.trim().toLowerCase() === name.toLowerCase());
+        let sid: number;
+        if (match) {
+          sid = match.id;
+          undo.updatedSuppliers!.push({ id: sid, data: { ...match } });
+          await tx.updateTable('suppliers').set({ phone: phone || match.phone, area: area || match.area }).where('id', '=', sid).execute();
+        } else {
+          sid = (await tx.insertInto('suppliers').values({ name, phone, area, active: 1, created_at: now }).returning('id').executeTakeFirstOrThrow()).id;
+          undo.createdSuppliers!.push(sid);
+          if (amt !== 0) {
+            await supplierEntry(tx, user, {
+              supplierId: sid, date: asOf, kind: 'opening', refType: 'import', refId: imp.id,
+              owed: amt > 0 ? amt : 0, paid: amt < 0 ? -amt : 0, note: `Opening balance as on ${formatDate(asOf)}`,
+            });
+            owedToSuppliers += amt;
+          }
+        }
+        continue;
+      }
       const fields = {
         name: d.name.trim(),
         nickname: (d.nickname ?? '').trim(),
@@ -682,7 +769,9 @@ export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: R
       }
       await saveVersion(tx, 'customer', cid, fields, match ? `Updated by import #${imp.id}` : `Created by import #${imp.id}`, user.id);
     }
-    summary = `${undo.createdCustomers.length} new, ${undo.updatedCustomers.length} updated · opening dues ${formatRupees(total)}`;
+    const made = undo.createdCustomers.length + undo.createdSuppliers!.length;
+    const changed = undo.updatedCustomers.length + undo.updatedSuppliers!.length;
+    summary = `${made} new, ${changed} updated · customers owe ${formatRupees(total)} · owed to suppliers ${formatRupees(owedToSuppliers)}`;
   }
 
   await tx.updateTable('imports').set({ summary: JSON.stringify({ text: summary, undo }) }).where('id', '=', imp.id).execute();
@@ -698,6 +787,11 @@ export async function undoImport(tx: Tx, user: User, importId: number) {
   if (imp.undone || latest?.id !== imp.id) throw new HttpError(409, 'Only the most recent import can be undone', 'conflict');
   const { undo } = JSON.parse(imp.summary || '{}') as { undo: UndoData };
   const today = istDate();
+
+  // What the import put on the purchase ledger: its deliveries' totals (stock files) and supplier opening balances (dues files).
+  const deliveryIds = (await tx.selectFrom('stock_ins').select('id').where('import_id', '=', importId).execute()).map((r) => r.id);
+  const fromThisImport = (r: { ref_type: string | null; ref_id: number | null }) =>
+    (r.ref_type === 'import' && r.ref_id === importId) || (r.ref_type === 'stock_in' && r.ref_id != null && deliveryIds.includes(r.ref_id));
 
   // Stock movements and deliveries from the import.
   await tx.deleteFrom('stock_movements').where('import_id', '=', importId).execute();
@@ -744,6 +838,24 @@ export async function undoImport(tx: Tx, user: User, importId: number) {
   for (const u of undo.updatedCustomers) {
     const { id, ...rest } = u.data as { id: number } & Record<string, never>;
     await tx.updateTable('customers').set(rest).where('id', '=', id).execute();
+  }
+
+  // The purchase ledger is append-only too: each row the import made gets a reversal.
+  const supplierRows = (await tx.selectFrom('supplier_ledger').selectAll().execute()).filter(fromThisImport);
+  for (const r of supplierRows) {
+    await supplierEntry(tx, user, {
+      supplierId: r.supplier_id, date: today, kind: 'reversal', refType: 'import', refId: importId,
+      owed: r.paid_paise, paid: r.owed_paise, note: `Undo import #${importId}: ${r.kind === 'purchase' ? 'delivery' : 'opening balance'} reversed`,
+    });
+  }
+  for (const sid of [...new Set([...(undo.createdSuppliers ?? [])])]) {
+    const other = (await tx.selectFrom('supplier_ledger').selectAll().where('supplier_id', '=', sid).execute()).some((r) => !fromThisImport(r));
+    const used = await tx.selectFrom('cash_outs').select('id').where('supplier_id', '=', sid).executeTakeFirst();
+    if (!other && !used) await tx.updateTable('suppliers').set({ active: 0 }).where('id', '=', sid).execute();
+  }
+  for (const u of undo.updatedSuppliers ?? []) {
+    const { id, ...rest } = u.data as { id: number } & Record<string, never>;
+    await tx.updateTable('suppliers').set(rest).where('id', '=', id).execute();
   }
 
   await tx.updateTable('imports').set({ undone: 1 }).where('id', '=', importId).execute();

@@ -26,6 +26,9 @@ const permFor: Record<ImportKind, 'import.products' | 'import.stock' | 'import.c
 /** A products file from someone who can add items but not edit them may only contain new ones. */
 const addOnly = (user: { role: Role }, kind: ImportKind) => kind === 'products' && !can(user.role, 'catalog.edit');
 
+// Quantities offered in the stock sheet's dropdown; any other number can be typed.
+const QUANTITIES = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 24, 25, 30, 40, 50, 60, 100];
+
 // Pack sizes offered in the dropdown, with any size this shop already uses added.
 const COMMON_SIZES = [
   '100 g', '200 g', '250 g', '500 g', '1 kg', '2 kg', '5 kg', '10 kg', '15 kg', '20 kg', '25 kg', '26 kg', '28 kg', '30 kg', '40 kg', '50 kg',
@@ -45,7 +48,7 @@ admin.get('/import/template/:file', async (c) => {
   if (!m) throw bad('Unknown template');
   const kind = m[1] as ImportKind;
   const fields = FIELDS[kind].filter((f) => !f.advanced); // the products template has exactly the eight simple columns
-  const title = { products: 'Products', stock: 'Stock deliveries', customers: 'Customer dues' }[kind];
+  const title = { products: 'Products', stock: 'Stock deliveries', customers: 'Dues' }[kind];
   const examples = EXAMPLES[kind];
   const rowOf = (e: Record<string, string>) => fields.map((f) => e[f.key] ?? '');
   if (m[2] === 'csv') {
@@ -68,39 +71,93 @@ admin.get('/import/template/:file', async (c) => {
   ws.getRows(2, examples.length)?.forEach((r) => (r.font = { italic: true, color: { argb: 'FF6B7280' } }));
   ws.views = [{ state: 'frozen', ySplit: 1 }];
 
+  // The dropdowns read their choices from a hidden sheet, one column per list. Excel wants one validation per column
+  // range (cell by cell, ExcelJS merges them into overlapping ranges and Excel "repairs" the file).
+  const { k } = c.get('db');
+  const LAST = 500;
+  const lists = wb.addWorksheet('Lists');
+  lists.state = 'hidden';
+  let listCols = 0;
+  const addList = (heading: string, values: (string | number)[]) => {
+    const col = lists.getColumn(++listCols);
+    col.values = [heading, ...values];
+    return `Lists!$${col.letter}$2:$${col.letter}$${Math.max(values.length, 1) + 1}`;
+  };
+  const letterOf = (key: string) => ws.getColumn(fields.findIndex((f) => f.key === key) + 1).letter;
+  const rangeOf = (key: string) => `${letterOf(key)}2:${letterOf(key)}${LAST}`;
+  // (ExcelJS's own typings leave out the worksheet's validation table, which exists at runtime.)
+  const rules = (ws as unknown as { dataValidations: { model: Record<string, unknown> } }).dataValidations.model;
+  /** A dropdown. `strict` refuses anything else; otherwise it only warns, so a new name can still be typed. */
+  const choose = (key: string, range: string, o: { title: string; prompt: string; error: string; strict?: boolean }) => {
+    rules[rangeOf(key)] = {
+      type: 'list', allowBlank: true, formulae: [range],
+      showInputMessage: true, promptTitle: o.title, prompt: o.prompt,
+      showErrorMessage: true, errorStyle: o.strict ? 'stop' : 'warning', errorTitle: o.strict ? 'Pick from the list' : 'Not in the list', error: o.error,
+    };
+  };
+  const number = (key: string, o: { min: number; max?: number }) => {
+    rules[rangeOf(key)] = {
+      type: 'decimal', operator: o.max == null ? 'greaterThanOrEqual' : 'between', formulae: o.max == null ? [o.min] : [o.min, o.max],
+      allowBlank: true, showErrorMessage: true, errorStyle: 'stop', errorTitle: 'A number', error: o.min < 0 ? 'Enter a number; a minus sign means paid in advance.' : 'Enter a number, 0 or more.',
+    };
+  };
+
+  const packTypes = allPackKinds(customPackTypes(await getSettings(k))).map((t) => t.name);
   if (kind === 'products') {
-    // The dropdowns read their choices from a hidden sheet: pack types (built in + this shop's own) and sizes.
-    const { k } = c.get('db');
-    const types = [...allPackKinds(customPackTypes(await getSettings(k))).map((t) => t.name), LOOSE_WORD];
+    const types = [...packTypes, LOOSE_WORD];
     const used = (await k.selectFrom('products').select('pack_size').distinct().where('pack_size', '!=', '').execute()).map((r) => r.pack_size);
     const sizes = [...new Map([...COMMON_SIZES, ...used].map((x) => [x.toLowerCase(), x])).values()].sort(bySize);
-    const lists = wb.addWorksheet('Lists');
-    lists.addRow(['Pack type', 'Pack size']);
-    for (let i = 0; i < Math.max(types.length, sizes.length); i++) lists.addRow([types[i] ?? '', sizes[i] ?? '']);
-    lists.state = 'hidden';
-    // One validation per column range. (Cell by cell, ExcelJS merges them into overlapping ranges and Excel "repairs" the file.)
-    const LAST = 500;
-    const rangeOf = (key: string) => {
-      const letter = ws.getColumn(fields.findIndex((f) => f.key === key) + 1).letter;
-      return `${letter}2:${letter}${LAST}`;
-    };
-    // (ExcelJS's own typings leave out the worksheet's validation table, which exists at runtime.)
-    const rules = (ws as unknown as { dataValidations: { model: Record<string, unknown> } }).dataValidations.model;
-    rules[rangeOf('packKind')] = {
-      type: 'list', allowBlank: true, formulae: [`Lists!$A$2:$A$${types.length + 1}`],
-      showInputMessage: true, promptTitle: 'Pack type', prompt: 'Pick from the list (Bori, Bag, Can… or Loose).',
-      showErrorMessage: true, errorStyle: 'stop', errorTitle: 'Pick from the list',
+    choose('packKind', addList('Pack type', types), {
+      title: 'Pack type', prompt: 'Pick from the list (Bori, Bag, Can… or Loose).', strict: true,
       error: 'Choose a pack type from the list. To add a new one, add it in Commercia first (Add Product, Pack type, New type), then download this template again.',
-    };
-    rules[rangeOf('packSize')] = {
-      type: 'list', allowBlank: true, formulae: [`Lists!$B$2:$B$${sizes.length + 1}`],
-      showInputMessage: true, promptTitle: 'Pack size', prompt: 'Pick a size, or type your own: a number and kg, g, L, ml or pc.',
-      showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Not in the list',
+    });
+    choose('packSize', addList('Pack size', sizes), {
+      title: 'Pack size', prompt: 'Pick a size, or type your own: a number and kg, g, L, ml or pc.',
       error: 'Use a number and kg, g, L, ml or pc, like 25 kg or 500 ml. Continue only if that is what you meant.',
-    };
-    for (const key of ['price', 'opening', 'reorder']) {
-      rules[rangeOf(key)] = { type: 'decimal', operator: 'greaterThanOrEqual', formulae: [0], allowBlank: true, showErrorMessage: true, errorStyle: 'stop', errorTitle: 'A number', error: 'Enter a number, 0 or more.' };
+    });
+    for (const key of ['price', 'opening', 'reorder']) number(key, { min: 0 });
+  }
+
+  if (kind === 'stock') {
+    const suppliers = (await k.selectFrom('suppliers').select('name').where('active', '=', 1).orderBy('name').execute()).map((r) => r.name);
+    const products = (await k.selectFrom('products').select('name_en').where('active', '=', 1).orderBy('name_en').execute()).map((r) => r.name_en);
+    choose('product', addList('Product', products), {
+      title: 'Product', prompt: 'Pick the item. Add it in Commercia first if it is not in the list.',
+      error: 'This is not an item in Commercia yet. Add it first (Import → Products, or Add Product), or Continue only if you typed its code.',
+    });
+    choose('supplier', addList('Supplier', suppliers), {
+      title: 'Supplier', prompt: 'Pick a supplier, or type a new name to add one.',
+      error: 'This supplier is not in the list yet. Continue to add them as a new supplier.',
+    });
+    choose('qty', addList('Quantity', QUANTITIES), {
+      title: 'Quantity', prompt: 'Pick a number, or type your own (2.5). It is how many of the Unit next to it.',
+      error: 'Use a number, like 10 or 2.5. Continue only if that is what you meant.',
+    });
+    choose('unit', addList('Unit', [...packTypes, 'kg', 'L', 'pc', 'Carton']), {
+      title: 'Unit', prompt: 'Bori, Bag, Can… for whole packs, or kg / L / pc. A bigger unit of the item (Carton) works too.',
+      error: 'Pick a unit from the list, or type the exact name of one of the item\'s bigger units. Continue only if that is what you meant.',
+    });
+    number('rate', { min: 0 });
+    // Amount = Quantity × Rate, worked out in the sheet itself. The import works it out again and ignores this column.
+    const [q, r, t] = [letterOf('qty'), letterOf('rate'), fields.findIndex((f) => f.key === 'total') + 1];
+    for (let row = 2; row <= LAST; row++) {
+      const ex = examples[row - 2];
+      const cell = ws.getCell(row, t);
+      cell.value = { formula: `IF(AND(ISNUMBER(${q}${row}),ISNUMBER(${r}${row})),ROUND(${q}${row}*${r}${row},2),"")`, result: ex ? Number(ex.row.total) : undefined };
+      cell.numFmt = '#,##0.00';
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
     }
+    ws.getColumn(t).numFmt = '#,##0.00';
+    wb.calcProperties.fullCalcOnLoad = true;
+  }
+
+  if (kind === 'customers') {
+    choose('party', addList('Type', ['Sale', 'Purchase']), {
+      title: 'Sale or Purchase', prompt: 'Sale = a customer who owes you. Purchase = a supplier you owe.', strict: true,
+      error: 'Choose Sale (a customer) or Purchase (a supplier).',
+    });
+    choose('priceList', addList('Price list', ['retail', 'wholesale']), { title: 'Price list', prompt: 'Customers only: retail or wholesale.', strict: true, error: 'Choose retail or wholesale.' });
+    number('amount', { min: -100000000, max: 100000000 });
   }
 
   const help = wb.addWorksheet('Instructions');
@@ -114,7 +171,16 @@ admin.get('/import/template/:file', async (c) => {
     help.addRow(['Names are made for you', '', 'From the columns: Sooji — Annapurna 25 kg Bag. Upload the same file again and nothing changes; change a price and that row is updated.']);
     help.addRow(['GST', '', 'New items get the default GST % in Settings; change one item later in Add Product. Prices include GST.']);
   }
-  if (kind === 'stock') help.addRow(['Tip', '', 'The product names must already exist in Commercia. Upload your products first.']);
+  if (kind === 'stock') {
+    help.addRow(['Amount', '', 'Worked out in the sheet: Quantity × Rate for each row (10 bori at 1,200 = 12,000). Fill the Amount cells down for any rows you add below the grey ones.']);
+    help.addRow(['Purchase ledger', '', 'All rows with the same Supplier and Date form one delivery. Its total (the sum of its Amounts) is added to what you owe that supplier, in Ledger → Purchase. Pay them there when you pay.']);
+    help.addRow(['Tip', '', 'The products must already exist in Commercia. Upload your products first.']);
+    help.addRow(['Total of this sheet', '', { formula: `SUM('${title}'!${letterOf('total')}2:${letterOf('total')}${LAST})`, result: examples.reduce((a, e) => a + Number(e.row.total), 0) }]);
+  }
+  if (kind === 'customers') {
+    help.addRow(['Sale and Purchase', '', 'Sale: a customer, and what they owe you (the Sales ledger). Purchase: a supplier, and what you owe them (the Purchase ledger). Leave Type empty for Sale.']);
+    help.addRow(['Existing names', '', 'A customer or supplier already in Commercia only gets their details (phone, area) updated; their amount is not added a second time.']);
+  }
   help.getColumn(3).alignment = { wrapText: true, vertical: 'top' };
   const buf = await wb.xlsx.writeBuffer();
   return new Response(buf as ArrayBuffer, {

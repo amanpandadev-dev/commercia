@@ -148,15 +148,17 @@ describe('suppliers and the purchase ledger', () => {
     expect(recent.closing).toBe(40000);
   });
 
-  it('imports of past deliveries name suppliers but put nothing on the purchase ledger', async () => {
+  it('puts an imported delivery on the purchase ledger too: quantity × rate', async () => {
     await owner.post('/api/import/commit', {
       kind: 'stock', fileName: 's.xlsx',
       rows: [{ date: addDays(today, -20), supplier: 'Historic Mills', product: 'Sugar', qty: '1', unit: 'Bag 50 kg', rate: '2000' }],
     });
     const h = (await owner.get('/api/supplier-ledger')).find((s: any) => s.name === 'Historic Mills');
     expect(h).toBeTruthy();
-    expect(h.balance).toBe(0);
-    expect((await ledger(h.id)).entries).toHaveLength(0);
+    expect(h.balance).toBe(200000); // 1 bag at 2,000
+    const l = await ledger(h.id);
+    expect(l.entries.map((e: any) => [e.kind, e.owed_paise])).toEqual([['purchase', 200000]]);
+    expect(l.entries[0].date).toBe(addDays(today, -20));
   });
 
   it('is wiped with the rest of the test data before go-live', async () => {

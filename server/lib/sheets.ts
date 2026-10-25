@@ -27,6 +27,7 @@ function cellText(v: ExcelJS.CellValue): string {
   if (v instanceof Date) return v.toISOString().slice(0, 10);
   if (typeof v === 'object') {
     if ('result' in v && v.result != null) return cellText(v.result as ExcelJS.CellValue);
+    if ('formula' in v || 'sharedFormula' in v) return ''; // a formula that was never worked out (the file was not saved by Excel)
     if ('richText' in v) return v.richText.map((t) => t.text).join('');
     if ('text' in v) return String(v.text);
     if ('error' in v) return '';
