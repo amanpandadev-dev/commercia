@@ -179,7 +179,7 @@ admin.get('/import/template/:file', async (c) => {
   }
   if (kind === 'customers') {
     help.addRow(['Sale and Purchase', '', 'Sale: a customer, and what they owe you (the Sales ledger). Purchase: a supplier, and what you owe them (the Purchase ledger). Leave Type empty for Sale.']);
-    help.addRow(['Existing names', '', 'A customer or supplier already in Commercia only gets their details (phone, area) updated; their amount is not added a second time.']);
+    help.addRow(['Existing names', '', 'A customer already in Commercia only gets their details (phone, area) updated. A supplier already in Commercia gets the amount too, unless they already have an opening balance: then only their details are updated, so uploading the same file twice never adds it twice.']);
   }
   help.getColumn(3).alignment = { wrapText: true, vertical: 'top' };
   const buf = await wb.xlsx.writeBuffer();
