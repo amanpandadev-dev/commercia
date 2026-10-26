@@ -7,6 +7,8 @@ import { HttpError, bad, logActivity, need } from '../lib/core';
 import { hashPassword, newTotpSecret, randomToken, sha256, verifyPassword, verifyTotp } from '../lib/crypto';
 import { nowIso } from '../db/index';
 import { getSettings, setSetting } from '../lib/settings';
+import { AttemptLimiter } from '../lib/rateLimit';
+import { clientIp, isHttps } from '../lib/proxy';
 import { askForReset, issueCode, pendingRequests, redeem, tellPasswordChanged } from '../lib/passwordReset';
 import type { User } from '../db/schema';
 import type { Role } from '../../shared/perms';
@@ -84,10 +86,15 @@ async function startSession(c: Parameters<MiddlewareHandler<AppEnv>>[0], user: U
     httpOnly: true,
     sameSite: 'Lax',
     path: '/',
-    secure: c.req.url.startsWith('https:'),
+    secure: isHttps(c),
     maxAge: ABSOLUTE_MS / 1000,
   });
 }
+
+// 5 wrong passwords in 15 minutes lock the account for 15 minutes; 30 from one address lock that address. 5 wrong authenticator codes lock the codes.
+const loginAccount = new AttemptLimiter(5, 15 * 60_000, 15 * 60_000);
+const loginAddress = new AttemptLimiter(30, 15 * 60_000, 15 * 60_000);
+const codeAttempts = new AttemptLimiter(5, 10 * 60_000, 15 * 60_000);
 
 const passwordSchema = z.string().min(8, 'Password must be at least 8 characters');
 
@@ -155,12 +162,20 @@ auth.post('/login', async (c) => {
   else if (body.email) q = q.where('email', '=', body.email.toLowerCase());
   else throw bad('Choose a user');
   const user = await q.executeTakeFirst();
+  // Wrong passwords lock the account (also for names that are not users) and the address for a while.
+  const who = `login:${user?.id ?? `?${(body.email ?? '').toLowerCase()}`}`;
+  const from = `login-ip:${clientIp(c)}`;
+  loginAccount.check(who);
+  loginAddress.check(from);
   // Same work whether or not the user exists, so timing doesn't reveal accounts.
   const ok = user ? verifyPassword(body.password, user.password_hash) : (verifyPassword(body.password, hashPassword('x')), false);
   if (!user || !ok) {
+    loginAccount.fail(who);
+    loginAddress.fail(from);
     await logActivity(k, user?.id ?? null, 'login_failed', 'user', user?.id ?? null, `Wrong password for ${user?.name ?? body.email ?? '?'}`);
     throw new HttpError(401, 'Wrong password', 'bad_credentials');
   }
+  loginAccount.clear(who);
   await startSession(c, user);
   await logActivity(k, user.id, 'login', 'user', user.id, `${user.name} logged in`);
   const s = await getSettings(k);
@@ -208,10 +223,13 @@ async function partialSession(c: Parameters<MiddlewareHandler<AppEnv>>[0]) {
 auth.post('/totp/verify', async (c) => {
   const { code } = z.object({ code: z.string() }).parse(await c.req.json());
   const { s, user } = await partialSession(c);
+  codeAttempts.check(`code:${user.id}`);
   if (!user.totp_secret || user.totp_enabled !== 1 || !verifyTotp(user.totp_secret, code)) {
+    codeAttempts.fail(`code:${user.id}`);
     await logActivity(c.get('db').k, user.id, 'login_failed', 'user', user.id, `Wrong authenticator code for ${user.name}`);
     throw new HttpError(401, 'Wrong code', 'bad_totp');
   }
+  codeAttempts.clear(`code:${user.id}`);
   await c.get('db').k.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();
   return c.json({ ok: true });
 });
@@ -231,7 +249,12 @@ auth.post('/totp/enroll', async (c) => {
 auth.post('/totp/confirm', async (c) => {
   const { code } = z.object({ code: z.string() }).parse(await c.req.json());
   const { s, user } = await partialSession(c);
-  if (!user.totp_secret || !verifyTotp(user.totp_secret, code)) throw new HttpError(400, 'That code did not match', 'bad_totp');
+  codeAttempts.check(`code:${user.id}`);
+  if (!user.totp_secret || !verifyTotp(user.totp_secret, code)) {
+    codeAttempts.fail(`code:${user.id}`);
+    throw new HttpError(400, 'That code did not match', 'bad_totp');
+  }
+  codeAttempts.clear(`code:${user.id}`);
   const { k } = c.get('db');
   await k.updateTable('users').set({ totp_enabled: 1 }).where('id', '=', user.id).execute();
   await k.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();

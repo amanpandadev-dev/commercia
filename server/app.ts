@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { secureHeaders } from 'hono/secure-headers';
 import { ZodError } from 'zod';
 import type { AppEnv } from './lib/core';
 import { HttpError } from './lib/core';
@@ -14,6 +15,9 @@ import { admin } from './routes/admin';
 /** The API. Kept free of Node-only serving so it can also run on Cloudflare Workers later. */
 export function createApp(db: Db) {
   const app = new Hono<AppEnv>();
+
+  // No framing (clickjacking), no guessing of file types, no referrer leaks, and HSTS once the site is served over https.
+  app.use('*', secureHeaders({ xFrameOptions: 'DENY', referrerPolicy: 'no-referrer', crossOriginEmbedderPolicy: false }));
 
   app.use('*', async (c, next) => {
     c.set('db', db);
