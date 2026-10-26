@@ -6,6 +6,7 @@ import { bad, logActivity, need, notFound, saveVersion, toNum } from '../lib/cor
 import { nowIso } from '../db/index';
 import { billSchema, cancelBill, createBill, describeParts, insertPayment, ledgerEntry, partSchema, reversePayment } from '../lib/billing';
 import { customerBalances } from '../lib/catalog';
+import { itemsBoughtByCustomer } from '../lib/itemSummary';
 import { getSettings } from '../lib/settings';
 import { istDate, isIsoDate } from '../../shared/dates';
 import { formatRupees } from '../../shared/money';
@@ -340,6 +341,8 @@ sales.get('/customers/:id/ledger', async (c) => {
     entries,
     closing: bal,
     balance,
+    // The list under the statement: what they bought in this date range, per item.
+    items: await itemsBoughtByCustomer(k, id, from && isIsoDate(from) ? from : undefined, to && isIsoDate(to) ? to : undefined),
     payments: payments.map((p) => ({ ...p, parts: parts.filter((x) => x.payment_id === p.id) })),
     history: history.map((h) => ({ ...h, data: JSON.parse(h.data) })),
   });

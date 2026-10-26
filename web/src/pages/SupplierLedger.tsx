@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Wallet, Plus, Pencil, Search, Undo2, Download, SlidersHorizontal } from 'lucide-react';
 import { api, exportExcel } from '../api';
 import { useApp } from '../state';
+import { ItemsBought } from '../components/ItemsBought';
 import { Avatar, Bi, Empty, Field, Modal, ReasonDialog } from '../components/ui';
 import { rs, MODE_LABEL, MODES, type Mode } from '../format';
 import { parseRupees } from '../../../shared/money';
@@ -222,6 +223,7 @@ function SupplierPanel({ supplierId, row, onPay, onChanged }: { supplierId: numb
         </table>
         {entries.length === 0 && <Empty>{filtered ? 'Nothing matches these filters' : 'No entries yet'}</Empty>}
       </div>
+      {type !== 'payments' && <ItemsBought items={d.items ?? []} title={from || to ? 'Items bought in this period' : 'Items bought from this supplier'} times="deliveries" />}
       {filtered && entries.length > 0 && (
         <div className="card-pad faint" style={{ fontSize: 13 }}>
           In this view: bought <b className="num">{rs(d.totals.purchased, false)}</b> · paid <b className="num">{rs(d.totals.paid, false)}</b>. The balance column is always the real balance after that entry.
@@ -237,6 +239,10 @@ function SupplierPanel({ supplierId, row, onPay, onChanged }: { supplierId: numb
               name: 'Ledger',
               columns: [{ header: 'Date', key: 'date' }, { header: 'Particulars', key: 'note' }, { header: 'Invoice', key: 'invoiceNo' }, { header: 'Bought', key: 'owed', type: 'money' }, { header: 'Paid', key: 'paid', type: 'money' }, { header: 'You owe', key: 'balance', type: 'money' }],
               rows: entries.map((e: any) => ({ date: e.date, note: e.note, invoiceNo: e.invoiceNo ?? '', owed: e.owed_paise, paid: e.paid_paise, balance: e.balance })),
+            }, {
+              name: 'Items bought',
+              columns: [{ header: 'Item', key: 'name' }, { header: 'Quantity', key: 'qty' }, { header: 'Unit', key: 'unit' }, { header: 'Deliveries', key: 'times' }, { header: 'Last', key: 'last' }, { header: 'Amount', key: 'amount', type: 'money' }],
+              rows: (d.items ?? []).map((i: any) => ({ name: i.name, qty: i.qtyMilli / 1000, unit: i.unit, times: i.times, last: i.lastDate, amount: i.amountPaise })),
             }])
           }
         >
