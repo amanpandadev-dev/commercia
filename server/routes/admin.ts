@@ -338,12 +338,13 @@ admin.post('/backup/now', async (c) => {
   return c.json(res);
 });
 
-/** Download a copy of the database, e.g. to a USB drive. */
+/** Download a copy of the database, e.g. to a USB drive. It is locked with the secret key like every backup. */
 admin.get('/backup/download', async (c) => {
-  await need(c, 'backup.run');
+  const user = await need(c, 'backup.run');
   const db = c.get('db');
   const res = await runBackup(db);
   const data = fs.readFileSync(res.file);
+  await logActivity(db.k, user.id, 'backup_download', 'database', null, `${user.name} downloaded a backup (${path.basename(res.file)}, ${Math.round(res.size / 1024)} KB)`);
   return new Response(data, {
     headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${path.basename(res.file)}"` },
   });
@@ -357,12 +358,20 @@ const TABLES: (keyof DB)[] = [
 ];
 export { TABLES };
 
+/** Columns that never leave the database in an export: password hashes and authenticator secrets. */
+const NEVER_EXPORTED: Partial<Record<keyof DB, string[]>> = { users: ['password_hash', 'totp_secret'] };
+
 admin.get('/admin/export.json', async (c) => {
   const user = await need(c, 'backup.run');
   const { k } = c.get('db');
   const out: Record<string, unknown[]> = {};
-  for (const t of TABLES) out[t] = await k.selectFrom(t).selectAll().execute();
-  await logActivity(k, user.id, 'export', 'database', null, 'Exported all data');
+  let rows = 0;
+  for (const t of TABLES) {
+    const hide = NEVER_EXPORTED[t] ?? [];
+    out[t] = (await k.selectFrom(t).selectAll().execute()).map((r) => Object.fromEntries(Object.entries(r as Record<string, unknown>).filter(([col]) => !hide.includes(col))));
+    rows += out[t].length;
+  }
+  await logActivity(k, user.id, 'export', 'database', null, `${user.name} exported all data (${rows} rows in ${TABLES.length} tables; no passwords or secrets)`);
   return new Response(JSON.stringify({ app: 'commercia', version: 1, exportedAt: new Date().toISOString(), tables: out }), {
     headers: { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="commercia-export.json"' },
   });

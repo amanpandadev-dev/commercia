@@ -5,6 +5,7 @@ import { nowIso } from '../db/index';
 import { getSettings, setSetting } from './settings';
 import { logActivity } from './core';
 import { istDate } from '../../shared/dates';
+import { BACKUP_EXT, lockFile, reencryptBackups } from './backupCrypto';
 
 const KEEP = 30;
 
@@ -15,7 +16,7 @@ export function listBackups(configured: string): { name: string; size: number; a
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir)
-    .filter((f) => /^commercia-.*\.db$/.test(f))
+    .filter((f) => /^commercia-.*\.db(\.enc)?$/.test(f))
     .map((f) => {
       const st = fs.statSync(path.join(dir, f));
       return { name: f, size: st.size, at: st.mtime.toISOString() };
@@ -33,8 +34,15 @@ export async function runBackup(db: Db, tag = ''): Promise<{ file: string; size:
   const dir = dirFor(s.backup_dir);
   fs.mkdirSync(dir, { recursive: true });
   const stamp = new Date(Date.now() + 330 * 60000).toISOString().replace(/[:T]/g, '-').slice(0, 19);
-  const file = path.join(dir, `commercia-${stamp}${tag ? `-${tag}` : ''}.db`);
-  await db.sqlite.backup(file);
+  const file = path.join(dir, `commercia-${stamp}${tag ? `-${tag}` : ''}${BACKUP_EXT}`);
+  // The plain copy exists only for a moment, next to the database (never in the backup folder, which may be synced), and is deleted at once.
+  const plain = path.join(path.dirname(db.file ?? dir), `.backup-${process.pid}-${Date.now()}.tmp`);
+  try {
+    await db.sqlite.backup(plain);
+    await lockFile(plain, file, db.secrets);
+  } finally {
+    fs.rmSync(plain, { force: true });
+  }
   await setSetting(db.k, 'last_backup_at', nowIso());
   const old = listBackups(s.backup_dir).filter((b) => !b.name.includes('before-'));
   for (const b of old.slice(KEEP)) fs.rmSync(path.join(dir, b.name), { force: true });
@@ -59,6 +67,10 @@ export function scheduleBackups(db: Db): NodeJS.Timeout | null {
       await logActivity(db.k, null, 'backup_failed', 'database', null, `Nightly backup failed: ${e instanceof Error ? e.message : e}`).catch(() => {});
     }
   };
+  // Backups made before they were locked get locked now.
+  setTimeout(() => {
+    getSettings(db.k).then((s) => reencryptBackups(s.backup_dir, db.secrets, { onlyPlain: true })).catch(() => {});
+  }, 5_000);
   setTimeout(tick, 15_000);
   return setInterval(tick, 10 * 60_000);
 }
