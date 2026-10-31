@@ -152,7 +152,8 @@ describe('exports and downloads through the app', () => {
     expect(log.summary).toMatch(/Sunil Sharma exported all data \(\d+ rows in \d+ tables/);
   });
 
-  it('downloads a locked backup, and logs it', async () => {
+  // (File backups are the SQLite pilot's; on Postgres the host's nightly backups do that job.)
+  it.skipIf(!!process.env.TEST_DATABASE_URL)('downloads a locked backup, and logs it', async () => {
     const res = await ctx.app.request('/api/backup/download', { headers: { Cookie: await cookie() } });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-disposition')).toMatch(/\.db\.enc"/);

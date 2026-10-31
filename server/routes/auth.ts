@@ -2,7 +2,7 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import type { AppEnv } from '../lib/core';
-import { HttpError, REAUTH_MINUTES, bad, logActivity, need, requireReauth } from '../lib/core';
+import { HttpError, REAUTH_MINUTES, bad, int, logActivity, need, requireReauth } from '../lib/core';
 import { hashPassword, hashPasswordAsync, newTotpSecret, passwordNeedsRehash, randomToken, sha256, verifyPassword, verifyPasswordAsync, verifyTotpStep } from '../lib/crypto';
 import { MAX_LENGTH, MIN_LENGTH, checkPassword, type Who } from '../lib/passwordPolicy';
 import { nowIso } from '../db/index';
@@ -521,7 +521,7 @@ users.get('/password-requests', async (c) => {
 
 users.post('/password-requests/:id/dismiss', async (c) => {
   const actor = await need(c, 'users.manage');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { k } = c.get('db');
   const req = (await pendingRequests(k, actor)).find((r) => r.id === id);
   if (!req) throw new HttpError(404, 'Request not found', 'not_found');
@@ -570,7 +570,7 @@ users.post('/:id/reset-code', async (c) => {
   const actor = await need(c, 'users.manage');
   await requireReauth(c);
   const { k } = c.get('db');
-  const target = await k.selectFrom('users').selectAll().where('id', '=', Number(c.req.param('id'))).executeTakeFirst();
+  const target = await k.selectFrom('users').selectAll().where('id', '=', int(c.req.param('id'))).executeTakeFirst();
   if (!target) throw new HttpError(404, 'User not found', 'not_found');
   guardAdmin(actor, target.role);
   if (target.active !== 1) throw bad('This person is deactivated');
@@ -583,7 +583,7 @@ users.post('/:id/enrolment-code', async (c) => {
   const actor = await need(c, 'users.manage');
   await requireReauth(c);
   const { k } = c.get('db');
-  const target = await k.selectFrom('users').selectAll().where('id', '=', Number(c.req.param('id'))).executeTakeFirst();
+  const target = await k.selectFrom('users').selectAll().where('id', '=', int(c.req.param('id'))).executeTakeFirst();
   if (!target) throw new HttpError(404, 'User not found', 'not_found');
   guardAdmin(actor, target.role);
   if (target.active !== 1) throw bad('This person is deactivated');
@@ -594,7 +594,7 @@ users.post('/:id/enrolment-code', async (c) => {
 users.patch('/:id', async (c) => {
   const actor = await need(c, 'users.manage');
   await requireReauth(c);
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const body = z
     .object({
       name: z.string().min(1).optional(),

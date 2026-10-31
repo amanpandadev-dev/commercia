@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv, Tx } from '../lib/core';
-import { HttpError, bad, logActivity, need, notFound, saveVersion } from '../lib/core';
+import { HttpError, bad, int, logActivity, need, notFound, saveVersion } from '../lib/core';
 import { nowIso } from '../db/index';
 import { lastPurchasePerBase } from '../lib/catalog';
 import { istDate, isIsoDate } from '../../shared/dates';
@@ -302,7 +302,7 @@ stock.get('/losses', async (c) => {
 
 stock.post('/losses/:id/confirm', async (c) => {
   const user = await need(c, 'loss.record');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { confirm } = z.object({ confirm: z.boolean() }).parse(await c.req.json());
   const { k } = c.get('db');
   await k.transaction().execute(async (tx) => {
@@ -320,7 +320,7 @@ stock.post('/losses/:id/confirm', async (c) => {
 /** Losses are never deleted; goods found later are a reversal with a reason (LOSS-3). */
 stock.post('/losses/:id/reverse', async (c) => {
   const user = await need(c, 'loss.record');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const body = z
     .object({ reason: z.string().trim().min(1, 'Give a reason'), date: z.string().optional(), lines: z.array(z.object({ productId: z.number(), unitId: z.number(), qtyMilli: z.number().int().positive() })).min(1) })
     .parse(await c.req.json());

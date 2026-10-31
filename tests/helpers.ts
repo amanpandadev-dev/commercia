@@ -18,6 +18,8 @@ export interface Client {
 async function freshDb(): Promise<Db> {
   const base = process.env.TEST_DATABASE_URL;
   if (!base) return openDb({ file: ':memory:' });
+  // With Postgres there is no key file: the key must come from the environment, as it will on a real host.
+  process.env.COMMERCIA_SECRET_KEY ??= 'c0'.repeat(32);
   const pg = (await import('pg')).default;
   const name = `commercia_t_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
   const admin = new pg.Client({ connectionString: base });

@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { sql } from 'kysely';
 import { z } from 'zod';
 import type { AppEnv, Tx } from '../lib/core';
-import { bad, logActivity, need, notFound, saveVersion, toNum } from '../lib/core';
+import { bad, containsText, int, logActivity, need, notFound, saveVersion, toNum } from '../lib/core';
 import { nowIso } from '../db/index';
 import { billSchema, cancelBill, createBill, describeParts, insertPayment, ledgerEntry, partSchema, reversePayment } from '../lib/billing';
 import { customerBalances } from '../lib/catalog';
@@ -51,17 +51,16 @@ sales.get('/bills', async (c) => {
       'b.paid_paise', 'b.credit_paise', 'b.rate_pending', 'b.needs_review', 'b.paper_ref', 'b.created_at', 'b.created_by', 'u.name as by',
     ])
     .orderBy('b.id', 'desc')
-    .limit(Math.min(Number(c.req.query('limit') ?? 200), 1000));
+    .limit(Math.min(int(c.req.query('limit') ?? 200), 1000));
   if (from && isIsoDate(from)) query = query.where('b.bill_date', '>=', from);
   if (to && isIsoDate(to)) query = query.where('b.bill_date', '<=', to);
-  if (c.req.query('customerId')) query = query.where('b.customer_id', '=', Number(c.req.query('customerId')));
-  if (c.req.query('userId')) query = query.where('b.created_by', '=', Number(c.req.query('userId')));
+  if (c.req.query('customerId')) query = query.where('b.customer_id', '=', int(c.req.query('customerId')));
+  if (c.req.query('userId')) query = query.where('b.created_by', '=', int(c.req.query('userId')));
   const status = c.req.query('status');
   if (status) query = query.where('b.status', '=', status as 'active');
   else query = query.where('b.status', '!=', 'estimate');
   if (q) {
-    const like = `%${q.toLowerCase()}%`;
-    query = query.where((eb) => eb.or([eb(eb.fn('lower', ['b.number']), 'like', like), eb(eb.fn('lower', ['b.paper_ref']), 'like', like), eb(eb.fn('lower', ['b.customer_name']), 'like', like)]));
+    query = query.where((eb) => eb.or([containsText('b.number', q), containsText('b.paper_ref', q), containsText('b.customer_name', q)]));
   }
   const rows = await query.execute();
   // Mode summary per bill, for the "Payment" column.
@@ -86,7 +85,7 @@ sales.get('/bills', async (c) => {
 });
 
 sales.get('/bills/:id', async (c) => {
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { k } = c.get('db');
   const bill = await k
     .selectFrom('bills as b')
@@ -127,7 +126,7 @@ sales.get('/bills/:id', async (c) => {
 
 sales.post('/bills/:id/cancel', async (c) => {
   const user = await need(c, 'bill.cancel');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { reason } = z.object({ reason: z.string() }).parse(await c.req.json());
   await c.get('db').k.transaction().execute((tx) => cancelBill(tx, user, id, reason, istDate()));
   return c.json({ ok: true });
@@ -135,7 +134,7 @@ sales.post('/bills/:id/cancel', async (c) => {
 
 sales.post('/bills/:id/reviewed', async (c) => {
   const user = await need(c, 'review.view');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { k } = c.get('db');
   await k.updateTable('bills').set({ needs_review: 0 }).where('id', '=', id).execute();
   await logActivity(k, user.id, 'review', 'bill', id, `Marked bill #${id} as checked`);
@@ -145,7 +144,7 @@ sales.post('/bills/:id/reviewed', async (c) => {
 /** Estimate → real bill in one tap (BILL-12). */
 sales.post('/bills/:id/convert', async (c) => {
   const user = await need(c, 'bill.create');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const body = z.object({ payments: z.array(partSchema).default([]), kind: z.enum(['receipt', 'tax_invoice', 'kaccha']).optional(), billDate: z.string().optional() }).parse(await c.req.json());
   const { k } = c.get('db');
   const result = await k.transaction().execute(async (tx) => {
@@ -263,7 +262,7 @@ sales.post('/customers', async (c) => {
 
 sales.patch('/customers/:id', async (c) => {
   const user = await need(c, 'customer.edit');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const body = customerSchema.extend({ reason: z.string().default('') }).parse(await c.req.json());
   const { k } = c.get('db');
   await k.transaction().execute(async (tx) => {
@@ -283,7 +282,7 @@ sales.patch('/customers/:id', async (c) => {
 
 /** Statement for a date range with opening balance and running balance (LED-2, LED-6). */
 sales.get('/customers/:id/ledger', async (c) => {
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { k } = c.get('db');
   const customer = await k.selectFrom('customers').selectAll().where('id', '=', id).executeTakeFirst();
   if (!customer) throw notFound('Customer');
@@ -385,7 +384,7 @@ sales.post('/payments', async (c) => {
 
 sales.post('/payments/:id/reverse', async (c) => {
   const user = await need(c, 'payment.reverse');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { reason } = z.object({ reason: z.string() }).parse(await c.req.json());
   await c.get('db').k.transaction().execute((tx) => reversePayment(tx, user, id, reason, istDate()));
   return c.json({ ok: true });

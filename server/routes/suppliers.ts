@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../lib/core';
-import { HttpError, bad, logActivity, need, notFound } from '../lib/core';
+import { HttpError, bad, int, logActivity, need, notFound } from '../lib/core';
 import { nowIso } from '../db/index';
 import { itemsBoughtFromSupplier } from '../lib/itemSummary';
 import { paySupplier, reverseSupplierPayment, supplierAgeing, supplierBalances, supplierEntry } from '../lib/suppliers';
@@ -36,7 +36,7 @@ suppliers.get('/supplier-ledger', async (c) => {
   const today = istDate();
   const q = (c.req.query('q') ?? '').trim().toLowerCase();
   const onlyDue = c.req.query('due') === '1';
-  const overdue = Number(c.req.query('overdue') ?? 0);
+  const overdue = int(c.req.query('overdue') ?? 0);
   const includeInactive = c.req.query('inactive') === '1';
 
   let sq = k.selectFrom('suppliers').selectAll();
@@ -69,7 +69,7 @@ suppliers.get('/supplier-ledger', async (c) => {
  */
 suppliers.get('/supplier-ledger/:id', async (c) => {
   await need(c, 'supplier.view');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { k } = c.get('db');
   const supplier = await k.selectFrom('suppliers').selectAll().where('id', '=', id).executeTakeFirst();
   if (!supplier) throw notFound('Supplier');
@@ -149,7 +149,7 @@ suppliers.post('/suppliers', async (c) => {
 
 suppliers.patch('/suppliers/:id', async (c) => {
   const user = await need(c, 'supplier.edit');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const body = supplierSchema.extend({ active: z.boolean().optional() }).parse(await c.req.json());
   const { k } = c.get('db');
   const s = await k.selectFrom('suppliers').selectAll().where('id', '=', id).executeTakeFirst();
@@ -166,7 +166,7 @@ suppliers.patch('/suppliers/:id', async (c) => {
 
 suppliers.post('/suppliers/:id/payments', async (c) => {
   const user = await need(c, 'supplier.pay');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const body = z.object({ date: z.string(), parts: z.array(partSchema).min(1, 'Enter an amount'), note: z.string().default('') }).parse(await c.req.json());
   if (!isIsoDate(body.date)) throw bad('Bad date');
   if (body.date > istDate()) throw bad('A payment cannot be dated in the future');
@@ -177,7 +177,7 @@ suppliers.post('/suppliers/:id/payments', async (c) => {
 /** A wrong invoice amount is fixed with a visible correction, never by editing a row. */
 suppliers.post('/suppliers/:id/corrections', async (c) => {
   const user = await need(c, 'supplier.pay');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const body = z
     .object({ date: z.string(), direction: z.enum(['owed', 'paid']), amountPaise: z.number().int().positive(), reason: z.string().trim().min(1, 'Give a reason') })
     .parse(await c.req.json());
@@ -198,7 +198,7 @@ suppliers.post('/suppliers/:id/corrections', async (c) => {
 
 suppliers.post('/supplier-ledger/entries/:id/reverse', async (c) => {
   const user = await need(c, 'supplier.pay');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { reason } = z.object({ reason: z.string() }).parse(await c.req.json());
   await c.get('db').k.transaction().execute((tx) => reverseSupplierPayment(tx, user, id, reason, istDate()));
   return c.json({ ok: true });

@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppEnv } from '../lib/core';
-import { HttpError, bad, logActivity, need, requireReauth } from '../lib/core';
+import { HttpError, bad, int, logActivity, need, requireReauth } from '../lib/core';
 import { EXAMPLES, FIELDS, commitImport, mapHeaders, previewImport, undoImport, type ImportKind, type RowData } from '../lib/importer';
 import { readSheet, toCsv } from '../lib/sheets';
 import { customPackTypes, getSettings, setSetting, type SchemePeriod } from '../lib/settings';
@@ -248,7 +248,7 @@ admin.get('/imports', async (c) => {
 });
 
 admin.post('/imports/:id/undo', async (c) => {
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const me = c.get('user');
   let user = me;
   if (!can(me.role, 'import.undo')) {

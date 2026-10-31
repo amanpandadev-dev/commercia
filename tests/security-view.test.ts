@@ -31,4 +31,28 @@ describe('the Security screen and the Dashboard alert', () => {
     await ctx.db.k.deleteFrom('auth_throttle').execute();
     expect((await entry.get('/api/dashboard')).security).toBeNull();
   });
+
+  it('has every kind of event it promises: refused actions, exports, backup downloads, resets, and the rest', async () => {
+    await ctx.db.k.deleteFrom('auth_throttle').execute();
+    const sunil = await ctx.client('sunil@shop.in');
+    const amit = await ctx.client('amit@shop.in');
+    await amit.req('POST', '/api/users', { name: 'X Y', email: 'x@y.in', role: 'entry', password: 'Cobalt-Fennel-Marble-8801' }); // 403: refused
+    await sunil.req('GET', '/api/admin/export.json');
+    const postgres = !!process.env.TEST_DATABASE_URL; // file backups are the SQLite pilot's
+    if (!postgres) await sunil.req('GET', '/api/backup/download');
+    await ctx.app.request('/api/auth/forgot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'amit@shop.in' }) });
+    const entry = await ctx.db.k.selectFrom('users').select('id').where('email', '=', 'amit@shop.in').executeTakeFirstOrThrow();
+    const { code } = await sunil.post(`/api/users/${entry.id}/reset-code`);
+    await ctx.app.request('/api/auth/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: entry.id, code, password: 'Quartz-Meadow-Lantern-6642' }) });
+    const seen = async (type: string) => (await sunil.get(`/api/security?type=${type}`)).events;
+    expect((await seen('refused'))[0].summary).toMatch(/Refused users\.manage for Amit Kumar \(entry\)/);
+    expect((await seen('export'))[0].summary).toMatch(/Sunil Sharma exported all data/);
+    if (!postgres) expect((await seen('backup_download'))[0].summary).toMatch(/Sunil Sharma downloaded a backup/);
+    expect((await seen('password_forgot'))[0].summary).toMatch(/Amit Kumar asked to reset their password/);
+    expect((await seen('password_reset')).map((e: any) => e.summary).join('|')).toMatch(/made a password reset code for Amit Kumar.*chose a new password|chose a new password.*made a password reset code/s);
+    const s = (await sunil.get('/api/security')).summary;
+    expect(s.refused).toBeGreaterThanOrEqual(1);
+    expect(s.exports).toBe(postgres ? 1 : 2);
+    expect(s.resets).toBeGreaterThanOrEqual(3);
+  });
 });

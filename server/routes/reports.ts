@@ -3,7 +3,7 @@ import { sql } from 'kysely';
 import { z } from 'zod';
 import ExcelJS from 'exceljs';
 import type { AppEnv, Tx } from '../lib/core';
-import { bad, logActivity, need, toNum } from '../lib/core';
+import { bad, int, logActivity, need, toNum } from '../lib/core';
 import { neutralizeFormula } from '../lib/sheets';
 import { categoryPaths, customerBalances, lastPurchasePerBase, loadCatalog, stockMap } from '../lib/catalog';
 import { addDays, istDate, isIsoDate } from '../../shared/dates';
@@ -150,7 +150,7 @@ reports.get('/reports/sales', async (c) => {
   await need(c, 'reports.view');
   const { from, to } = range(c);
   const groupBy = (c.req.query('groupBy') ?? 'day') as 'day' | 'month' | 'category' | 'brand' | 'product';
-  const categoryId = c.req.query('categoryId') ? Number(c.req.query('categoryId')) : null;
+  const categoryId = c.req.query('categoryId') ? int(c.req.query('categoryId')) : null;
   const { k } = c.get('db');
   const lines = await k
     .selectFrom('bill_lines as l')
@@ -323,7 +323,7 @@ reports.get('/reports/daybook', async (c) => {
     .execute();
   for (const a of adjs) entries.push({ type: 'adjustment', id: a.id, date: a.date, at: a.created_at, title: `Stock adjusted · ${a.name_en} ${a.qty_milli > 0 ? '+' : ''}${a.qty_milli / 1000} ${a.base_unit}`, party: a.note, amount: 0, method: '', by: userNames.get(a.created_by) ?? '', userId: a.created_by });
 
-  const userId = c.req.query('userId') ? Number(c.req.query('userId')) : null;
+  const userId = c.req.query('userId') ? int(c.req.query('userId')) : null;
   const type = c.req.query('type');
   const filtered = entries
     .filter((e) => (userId ? e.userId === userId : true) && (type ? e.type === type : true))
@@ -363,7 +363,7 @@ reports.get('/reports/payments', async (c) => {
     .where('p.date', '<=', to)
     .orderBy('p.date')
     .orderBy('p.id');
-  if (c.req.query('customerId')) q = q.where('p.customer_id', '=', Number(c.req.query('customerId')));
+  if (c.req.query('customerId')) q = q.where('p.customer_id', '=', int(c.req.query('customerId')));
   const pays = await q.execute();
   const parts = pays.length ? await k.selectFrom('payment_parts').selectAll().where('payment_id', 'in', pays.map((p) => p.id)).execute() : [];
   const mode = c.req.query('mode') as Mode | undefined;
@@ -454,7 +454,7 @@ reports.get('/reports/review', async (c) => {
     .orderBy('b.id', 'desc')
     .execute();
   const entryUsers = await k.selectFrom('users').select(['id', 'name']).where('role', '=', 'entry').execute();
-  const userId = c.req.query('userId') ? Number(c.req.query('userId')) : null;
+  const userId = c.req.query('userId') ? int(c.req.query('userId')) : null;
   const ids = userId ? [userId] : entryUsers.map((u) => u.id);
   const activity = ids.length
     ? await k
@@ -487,9 +487,9 @@ reports.get('/activity', async (c) => {
     .leftJoin('users as u', 'u.id', 'a.user_id')
     .select(['a.id', 'a.action', 'a.entity', 'a.entity_id', 'a.summary', 'a.created_at', 'a.user_id', 'u.name as by'])
     .orderBy('a.id', 'desc')
-    .limit(Math.min(Number(c.req.query('limit') ?? 200), 2000));
-  if (c.req.query('userId')) q = q.where('a.user_id', '=', Number(c.req.query('userId')));
-  if (c.req.query('before')) q = q.where('a.id', '<', Number(c.req.query('before')));
+    .limit(Math.min(int(c.req.query('limit') ?? 200), 2000));
+  if (c.req.query('userId')) q = q.where('a.user_id', '=', int(c.req.query('userId')));
+  if (c.req.query('before')) q = q.where('a.id', '<', int(c.req.query('before')));
   return c.json(await q.execute());
 });
 

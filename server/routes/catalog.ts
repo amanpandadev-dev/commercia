@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv, Tx } from '../lib/core';
-import { HttpError, bad, logActivity, need, notFound } from '../lib/core';
+import { HttpError, bad, int, logActivity, need, notFound } from '../lib/core';
 import { nowIso } from '../db/index';
 import { categoryPaths, gstOn, loadCatalog, priceOn, versionProduct, type PriceList } from '../lib/catalog';
 import { changeRate, markChecked, setPrice } from '../lib/rates';
@@ -48,7 +48,7 @@ catalog.post('/categories', async (c) => {
 
 catalog.patch('/categories/:id', async (c) => {
   const user = await need(c, 'catalog.edit');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const body = catSchema.partial().parse(await c.req.json());
   const { k } = c.get('db');
   const cat = await k.selectFrom('categories').selectAll().where('id', '=', id).executeTakeFirst();
@@ -72,7 +72,7 @@ catalog.patch('/categories/:id', async (c) => {
 
 catalog.delete('/categories/:id', async (c) => {
   const user = await need(c, 'catalog.edit');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { k } = c.get('db');
   const child = await k.selectFrom('categories').select('id').where('parent_id', '=', id).executeTakeFirst();
   const prod = await k.selectFrom('products').select('id').where('category_id', '=', id).executeTakeFirst();
@@ -239,7 +239,7 @@ catalog.post('/products', async (c) => {
 
 catalog.patch('/products/:id', async (c) => {
   const user = await need(c, 'catalog.edit');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const body = productSchema.parse(await c.req.json());
   const { k } = c.get('db');
   const p = await k.selectFrom('products').select('id').where('id', '=', id).executeTakeFirst();
@@ -254,7 +254,7 @@ catalog.patch('/products/:id', async (c) => {
 
 catalog.post('/products/:id/active', async (c) => {
   const user = await need(c, 'catalog.edit');
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { active } = z.object({ active: z.boolean() }).parse(await c.req.json());
   const { k } = c.get('db');
   await k.transaction().execute(async (tx) => {
@@ -268,7 +268,7 @@ catalog.post('/products/:id/active', async (c) => {
 
 /** History tab for a product (HIST-2, HIST-5): versions, price changes, GST changes and stock movements. */
 catalog.get('/products/:id/history', async (c) => {
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const { k } = c.get('db');
   const product = await k.selectFrom('products').selectAll().where('id', '=', id).executeTakeFirst();
   if (!product) throw notFound('Product');
