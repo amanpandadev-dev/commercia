@@ -31,3 +31,29 @@ describe('supplier accounts for old deliveries', () => {
     expect((await db.k.selectFrom('supplier_ledger').select('id').execute()).length).toBe(0);
   });
 });
+
+describe('security upgrades', () => {
+  it('bring a database from before them up to date in place, keeping people and their passwords and sessions', async () => {
+    const db = await openDb({ file: ':memory:' });
+    const { hashPassword } = await import('../server/lib/crypto');
+    const u = await db.k.insertInto('users').values({ name: 'Old Admin', email: 'old@shop.in', role: 'admin', password_hash: hashPassword('an-old-password'), active: 1, lang: 'en', totp_enabled: 1, totp_secret: 'JBSWY3DPEHPK3PXP', session_epoch: 0, created_at: new Date().toISOString() }).returning('id').executeTakeFirstOrThrow();
+    await db.k.insertInto('sessions').values({ id: 'abc', user_id: u.id, epoch: 0, totp_ok: 1, created_at: new Date().toISOString(), last_seen: new Date().toISOString(), expires_at: new Date(Date.now() + 1e9).toISOString() }).execute();
+    // Take away what a version from before these changes did not have.
+    for (const t of ['auth_throttle', 'recovery_codes', 'enrolment_codes']) await db.k.schema.dropTable(t).execute();
+    for (const c of ['totp_pending', 'totp_last_step']) await db.k.schema.alterTable('users').dropColumn(c).execute();
+    for (const c of ['enrol_ok', 'reauth_until', 'ip', 'device', 'ua_hash']) await db.k.schema.alterTable('sessions').dropColumn(c).execute();
+
+    await migrate(db.k, 'sqlite');
+    await migrate(db.k, 'sqlite'); // again: harmless
+    const tables = (await db.k.introspection.getTables()).reduce((m, t) => m.set(t.name, t.columns.map((c) => c.name)), new Map<string, string[]>());
+    expect(tables.get('auth_throttle')).toEqual(expect.arrayContaining(['key', 'fails', 'locked_until', 'strikes']));
+    expect(tables.get('recovery_codes')).toEqual(expect.arrayContaining(['user_id', 'code_hash', 'used_at']));
+    expect(tables.get('enrolment_codes')).toEqual(expect.arrayContaining(['user_id', 'code_hash', 'expires_at', 'attempts']));
+    expect(tables.get('users')).toEqual(expect.arrayContaining(['totp_pending', 'totp_last_step']));
+    expect(tables.get('sessions')).toEqual(expect.arrayContaining(['enrol_ok', 'reauth_until', 'ip', 'device', 'ua_hash']));
+    // Everyone is still there, with what they had.
+    const user = await db.k.selectFrom('users').selectAll().where('id', '=', u.id).executeTakeFirstOrThrow();
+    expect(user).toMatchObject({ email: 'old@shop.in', totp_enabled: 1, totp_secret: 'JBSWY3DPEHPK3PXP', totp_pending: null, totp_last_step: null });
+    expect(await db.k.selectFrom('sessions').select(['id', 'enrol_ok', 'ip']).executeTakeFirstOrThrow()).toEqual({ id: 'abc', enrol_ok: 0, ip: '' });
+  });
+});
