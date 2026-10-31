@@ -63,7 +63,8 @@ describe('security headers', () => {
     expect(h.get('referrer-policy')).toBe('no-referrer');
     expect(h.get('x-frame-options')).toBe('DENY');
     expect(h.get('permissions-policy')).toMatch(/camera=\(\)/);
-    expect(h.get('cross-origin-opener-policy')).toBe('same-origin');
+    expect(h.get('cross-origin-opener-policy')).toBeNull(); // over plain http (the Wi-Fi) it would only make the browser complain
+    expect(h.get('origin-agent-cluster')).toBeNull();
     expect(h.get('cross-origin-resource-policy')).toBe('same-origin');
     expect(h.get('access-control-allow-origin')).toBeNull(); // no CORS
   };
@@ -96,7 +97,10 @@ describe('security headers', () => {
     expect((await call('GET', '/api/account/me')).headers.get('cache-control')).toBe('no-store');
     expect((await call('GET', '/api/health', { headers: { 'X-Forwarded-Proto': 'https' } })).headers.get('strict-transport-security')).toBeNull(); // not a trusted proxy
     process.env.TRUST_PROXY = '1';
-    expect((await call('GET', '/api/health', { headers: { 'X-Forwarded-Proto': 'https' } })).headers.get('strict-transport-security')).toMatch(/max-age=31536000/);
+    const secure = await call('GET', '/api/health', { headers: { 'X-Forwarded-Proto': 'https' } });
+    expect(secure.headers.get('strict-transport-security')).toMatch(/max-age=31536000/);
+    expect(secure.headers.get('cross-origin-opener-policy')).toBe('same-origin'); // and over https the rest of the isolation headers
+    expect(secure.headers.get('origin-agent-cluster')).toBe('?1');
   });
 
   it('answers an unknown address under /api with JSON, not the web page (a login is asked for first)', async () => {

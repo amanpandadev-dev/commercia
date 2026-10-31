@@ -90,10 +90,14 @@ export const CSP = [
 
 export const securityHeaders: MiddlewareHandler<AppEnv> = async (c, next) => {
   // HSTS only when the visitor really is on https (it would be ignored, or worse, over plain http on the Wi-Fi).
-  const hsts = isHttps(c) ? 'max-age=31536000; includeSubDomains' : false;
+  const https = isHttps(c);
+  const hsts = https ? 'max-age=31536000; includeSubDomains' : false;
   return secureHeaders({
     contentSecurityPolicy: undefined,
     strictTransportSecurity: hsts,
+    // Browsers ignore these two over plain http (and print an error for it on every page), so they are sent only over https.
+    crossOriginOpenerPolicy: https ? 'same-origin' : false,
+    originAgentCluster: https ? '?1' : false,
     xFrameOptions: 'DENY',
     referrerPolicy: 'no-referrer',
     crossOriginEmbedderPolicy: false,

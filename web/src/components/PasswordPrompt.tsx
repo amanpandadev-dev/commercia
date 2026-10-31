@@ -26,6 +26,7 @@ export function PasswordPrompt() {
     setAsk(null);
   };
   return (
+    <div style={{ position: 'relative', zIndex: 100 }}>
     <Modal
       title="Type your password to continue"
       sub="This action needs your password again. It stays confirmed for a few minutes."
@@ -44,5 +45,6 @@ export function PasswordPrompt() {
         </Field>
       </form>
     </Modal>
+    </div>
   );
 }

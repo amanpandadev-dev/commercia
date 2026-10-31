@@ -41,7 +41,6 @@ export function App() {
   return (
     <BrowserRouter>
       <AppProvider me={auth.me as Me} onLogout={load}>
-        <PasswordPrompt />
         <Layout shopName={auth.shop.name}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -65,6 +64,8 @@ export function App() {
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Layout>
+        {/* After the layout, so it is on top of any dialog that asked for the password */}
+        <PasswordPrompt />
       </AppProvider>
     </BrowserRouter>
   );
