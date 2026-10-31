@@ -20,23 +20,20 @@ Cloudflare's screens and plan terms change. If a name below has moved, follow Cl
    - Name: Commercia. Application domain: `shop.yourdomain.com`.
    - Add a policy: name `Owner only`, action **Allow**, rule *Emails* → the owner's email address(es). Don't use "everyone" or a whole-domain rule.
    - Login method: **One-time PIN** (Cloudflare emails a code). Set the session length to 24 hours or less.
-7. **Tell Commercia it is behind a proxy.** Open `start.bat` in Notepad and add this line just above the line that starts `call npm run serve`:
-
-   ```
-   set TRUST_PROXY=1
-   ```
-
-   Save, close the Commercia window, and start it again. This makes the login cookie `Secure` and lets the lockout see each visitor's real address.
+7. **Tell Commercia it is behind a proxy.** Copy `.env.example` to `.env` (or run `npm run init-env`) and add the line `TRUST_PROXY=1`. Add `ALLOWED_ORIGINS=https://shop.yourdomain.com` too. Close the Commercia window and start it again. `TRUST_PROXY=1` means: believe the forwarding headers **only** from a program on this same laptop (the tunnel). Someone on the shop Wi-Fi who sends fake headers is ignored. It makes the login cookie `Secure` (`__Host-` prefixed), and the lockouts and rate limits then see each visitor's real address.
 8. **Check it.** On a phone using mobile data (not the shop Wi-Fi), open `https://shop.yourdomain.com`. You should get Cloudflare's email-code screen, then Commercia's login, then the authenticator code.
 
 Staff in the shop keep using the laptop's address on the shop Wi-Fi, as before.
 
 ## Security measures
 
-**Already in the app**
-- Five wrong passwords lock that account for 15 minutes, even for the right password; the same goes for five wrong authenticator codes. 30 wrong tries from one address lock that address.
-- The login cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` behind the tunnel. The site sends HSTS and refuses to be shown inside another page.
-- Sessions end after 12 idle hours, and a deactivated user or "sign out everywhere" ends them at once. Passwords are hashed. Wrong logins are in the activity log.
+**Already in the app** (details in `SECURITY.md`)
+- Wrong passwords, authenticator codes, recovery codes and reset codes lock the account (5, 15, 45, then 60 minutes, never longer) and the address, even for the right password later. A lock shows on the Security screen and Dashboard and is emailed if SMTP is set. Unlock on the laptop with `npm run reset-password -- <email> --unlock`.
+- The login cookie is `__Host-`prefixed, `HttpOnly`, `SameSite=Strict` and `Secure` behind the tunnel. Strict CSP, HSTS and no framing. Changes must come from the app's own address.
+- Rate limits on login, the API and uploads; request size and time limits.
+- The first-run setup screen works only on the shop laptop itself (or with a one-time console code), so a stranger reaching the URL on day one cannot claim the shop.
+- The login screen does not list names to anyone coming through the tunnel; people type their email.
+- Sessions end after 12 idle hours; Settings shows every signed-in device and can end any of them; a new device raises an alert.
 
 **Do these**
 1. Cloudflare Access in front, with only the owners' emails (step 6). Anyone else never reaches the Commercia login.
@@ -45,11 +42,12 @@ Staff in the shop keep using the laptop's address on the shop Wi-Fi, as before.
 4. Never port-forward on the router, and never share the tunnel token.
 5. Long, unique passwords. Remove users who have left (deactivate them).
 6. Encrypt the laptop's disk (BitLocker, in Windows 11 Pro), keep Windows Update and Defender on, and use a non-administrator Windows account for day-to-day work. The database has customer names, phone numbers and dues.
-7. Backups: **Settings → Backup** to a synced Google Drive/OneDrive folder plus a USB copy, and try a restore once.
-8. Now and then, read the activity log for `login_failed` entries, and Zero Trust → *Logs* → *Access* for who got in.
+7. Backups: **Settings → Backup** to a synced Google Drive/OneDrive folder plus a USB copy, keep a copy of the secret key (`data/commercia.key` or `COMMERCIA_SECRET_KEY`) somewhere else, and try a restore once (`npm run restore-backup`).
+8. Now and then, open **Security** in Commercia (lockouts, new devices, exports) and read the activity log for `login_failed` entries, and Zero Trust → *Logs* → *Access* for who got in.
 
 **What this does not cover**
 - The laptop being off or offline: no access. Staff on the shop Wi-Fi still work if the router is up.
 - Malware on the laptop, or on the owner's phone.
-- Someone on the shop Wi-Fi who knows a password: `TRUST_PROXY` lets them fake their address to dodge the per-address limit, but the per-account lockout still applies. If that worries you, use a separate Wi-Fi for staff and keep the laptop's Windows firewall on.
-- There is no Content-Security-Policy yet, and the login screen still lists user names (Access hides it from everyone but the owner).
+- Cloudflare itself, or whoever controls the domain or the Cloudflare account (keep two-step login on both).
+- Staff on the shop Wi-Fi use plain http: a person on that Wi-Fi can read a login in transit. Use a strong Wi-Fi password and a separate guest network, and run `scripts\windows\firewall.bat allow` so only the shop network reaches the laptop.
+- Everything in this guide that touches Cloudflare was written from their documentation and has not been tried end to end.

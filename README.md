@@ -41,13 +41,14 @@ If Windows asks about the firewall, allow **Private networks** so phones on the 
 
 | Need | How |
 | --- | --- |
-| Start | `npm start` on the shop laptop. The console prints the address for this computer and for phones on the shop Wi-Fi (PILOT-2). Set `HOST=127.0.0.1` to keep it on the laptop only. |
+| Start | `npm start` on the shop laptop. The console prints the address for this computer and for phones on the shop Wi-Fi (PILOT-2). Set `HOST=127.0.0.1` to keep it on the laptop only. Only this computer, private networks and Tailscale are let in (`ALLOWED_IPS` changes that). |
 | Data | One file: `data/commercia.db`. Set `COMMERCIA_DB=/path/file.db` to put it elsewhere. |
-| Backups | Automatic every night after 9 pm, and at start-up if the last one is over a day old. The last 30 copies are kept. **Settings → Backup** has *Back up now*, *Download a copy*, and the folder setting (point it at a USB drive or a Google Drive/OneDrive synced folder). |
+| Backups | Automatic every night after 9 pm, and at start-up if the last one is over a day old. The last 30 copies are kept. They are **locked** (`.db.enc`) with the secret key: keep a copy of `data/commercia.key` (or your `COMMERCIA_SECRET_KEY`) somewhere other than the backup folder, or they cannot be opened. **Settings → Backup** has *Back up now*, *Download a copy*, and the folder setting (point it at a USB drive or a Google Drive/OneDrive synced folder). |
 | Products | **Import → Products & opening stock**: download the template, which has exactly eight columns: **Category, Brand, Pack type, Pack size, Pack price, Stock, Reorder at, Aliases (Hindi names)**. Pack type and Pack size have dropdowns; Pack type can be *Loose* for things sold by the kg or litre (then Pack size is 1 kg or 1 L and Stock is in kg). The grey rows are examples: delete them, fill in one row per company and size, upload, check the preview (it shows the name each row will get), confirm. The uploaded file isn't stored, and uploading the same file again changes nothing. A pack type that isn't in the list is added first (**Settings → Pack types**, or *Add Product → Pack type → New type*), then download the template again. New items get the **default GST** from Settings; names are built for you (*Sooji — Annapurna 25 kg Bag*), and an item already added under another name is recognised by company, pack type and size. |
 | Stock deliveries | **Import → Stock deliveries**: *Date, Supplier, Product, Quantity, Unit, Purchase rate per unit*, and **Amount**, which the sheet works out itself (Quantity × Rate: 10 bori at 1,200 = 12,000). Product, Supplier, Quantity and Unit have dropdowns (you can still type a new supplier or a bigger unit such as a carton). Rows with the same Supplier and Date form one delivery, and its total goes on that supplier's **purchase ledger**. Undoing the import reverses it. |
 | Old khata and supplier dues | **Import → Dues: customers & suppliers**: a **Type** column says *Sale* (a customer who owes you, on the sales ledger) or *Purchase* (a supplier you owe, on the purchase ledger); empty means Sale. Only *Name* and *Amount owed* are otherwise required. A negative amount means they (or you) paid in advance. A customer already in Commercia only has their details updated. A supplier already in Commercia (made by a stock file, say) gets the amount too, unless they already have an opening balance; then only their details are updated, so the same file never adds it twice. |
-| From outside the shop | **docs/REMOTE-ACCESS.md**: Cloudflare Tunnel with Cloudflare Access in front, step by step, and the security measures to take. Set `TRUST_PROXY=1` when running behind it. |
+| From outside the shop | **docs/REMOTE-ACCESS.md**: Cloudflare Tunnel with Cloudflare Access in front, step by step, and the security measures to take. Set `TRUST_PROXY=1` in `.env` when running behind it. |
+| Keep the shop network only | `scripts\windows\firewall.bat allow` adds one Windows Firewall rule (Private networks, this subnet, the Commercia port); `remove` takes it out. |
 | Wipe test data | **Settings → Before go-live** (Admin only; you type the shop name to confirm). Users and settings stay, and a backup is taken first. |
 
 ### Forgot your password?
@@ -56,24 +57,44 @@ On the login page tap **Forgot password?**, choose your name, and **Get a reset 
 
 - **Without email** (the default at the shop): the Owner or Admin sees your request on their Dashboard and under **Users**, checks it is really you, taps **Make a reset code** and reads the 8-character code out to you. You type it with a new password. A code works once, for an hour, and allows five wrong tries.
 - **With email**: set `SMTP_URL` (for example `smtps://user:password@smtp.example.com:465`) and `MAIL_FROM` before starting, and the code is emailed to the address on the account instead (it works for 30 minutes). If sending fails, the request goes to the Owner as above.
-- **The Admin** can't be reset by anyone else in the app. Without email, run this on the shop computer: `npm run reset-password -- ramesh@shop.in` (prints a new password; add `--reset-2fa` if the authenticator phone is lost).
+- **The Admin** can't be reset by anyone else in the app. Without email, run this on the shop computer: `npm run reset-password -- ramesh@shop.in` (prints a new password; add `--reset-2fa` if the authenticator phone is lost). After too many wrong tries an account locks for up to an hour; `--unlock` (or `--unlock-all`) lifts it at once.
 
-Setting a new password signs that person out everywhere. It does not switch off their authenticator-app code.
+Setting a new password signs that person out everywhere. It does not switch off their authenticator-app code. Passwords must be at least 10 characters, not a common password, and not made from the person's name, email or the shop's name.
 
 ### Restore a backup (ADM-3, PILOT-5)
 
 1. Stop the app (close the terminal window running `npm start`).
-2. Copy the backup you want, e.g. `backups/commercia-2026-10-12-21-10-00.db`, over `data/commercia.db`. Delete any `data/commercia.db-wal` and `data/commercia.db-shm` next to it.
+2. Run `npm run restore-backup -- backups/commercia-2026-10-12-21-10-00.db.enc --force` (`--force` is needed because a database is already there). It unlocks the backup with your secret key, checks it, keeps the current database aside as `data/commercia.db.before-restore-<time>`, and puts the backup in place. (An older plain `.db` backup also works: it is locked first, then restored.) A wrong key or a damaged file stops it before anything is changed.
 3. Run `npm start` again, then check **Dashboard** and **Reports → Day book** against what you expect.
 
-To rehearse this on another laptop, copy the backup there as `data/commercia.db` and run `npm start`. The totals should match.
+To rehearse this on another laptop, copy the backup and the key file (`data/commercia.key`, or set `COMMERCIA_SECRET_KEY`) there and run the same command (without `--force` on a fresh laptop). The totals should match.
+
+### Security, in short
+
+Full detail, the threat model, key rotation and what to do if a laptop is lost or a password leaks: **[SECURITY.md](SECURITY.md)**.
+
+- Two-step login for Owners and the Admin, with one-time recovery codes. Setting it up needs a code emailed to the account or read out by the Admin/Owner.
+- Wrong passwords and codes lock the account for 5 to 60 minutes (never for good). A lock shows on **Security** (Owner/Admin) and on the Dashboard.
+- Backups and authenticator secrets are encrypted with a key kept in `data/commercia.key` (made on first run) or `COMMERCIA_SECRET_KEY`. `npm run rotate-key` changes it.
+- Phones on the shop Wi-Fi type their email at login instead of tapping a name (set `SHOW_USERS_ON_LAN=1` to bring the list back). The first-run setup only works on the shop laptop.
+- Optional settings live in `.env` (copy `.env.example`, or run `npm run init-env`). Nothing is required.
+
+| Command | What it does |
+| --- | --- |
+| `npm run init-env` | Makes `.env` with a fresh random secret key (`setup.bat` does this) |
+| `npm run reset-password -- <email> [--unlock] [--reset-2fa] [--enrol-code]` / `-- --unlock-all` | Last-resort account help, on the shop computer |
+| `npm run restore-backup -- <file> [--force]` | Restore a backup, locked or plain |
+| `npm run rotate-key` | Move everything to a new secret key |
+| `npm run pg-backup` / `pg-restore` | Encrypted backup and restore drill for Postgres (docs/POSTGRES.md) |
 
 ### Going live on Supabase (PILOT-6)
 
 ```bash
 npm install pg
-DATABASE_URL="postgres://…supabase…" npm run move-to-postgres data/commercia.db
+DATABASE_URL="postgres://…supabase…?sslmode=require" npm run move-to-postgres data/commercia.db
 ```
+
+Before that, set up the two limited database logins, the secret key and encrypted off-site backups as in **[docs/POSTGRES.md](docs/POSTGRES.md)**.
 
 The script copies every table into the empty Postgres database. It then compares stock per item, every customer's balance, sales and payment totals, and stops with an error unless they match to the paisa. After that, run the app with `DATABASE_URL` set. All database-specific code is in `server/db/` (PILOT-3).
 
@@ -94,7 +115,7 @@ The server checks permissions on every request, not just the screens (AUTH-3, PI
 | Users, and reset codes for people who forgot their password | ✓ | ✓ (not Admins) | — |
 | Reset test data | ✓ | — | — |
 
-Owners and the Admin confirm each login with an authenticator-app code (AUTH-2). They set it up at their first login, from a QR code. The Admin can switch this off in **Settings → Security**; the demo seed switches it off.
+Owners and the Admin confirm each login with an authenticator-app code (AUTH-2). They set it up at their first login, from a QR code, after proving it is them with a code (emailed, or read out by the Admin). The Admin can switch this off in **Settings → Security**; the demo seed switches it off. Entry people do not need it (open risk in SECURITY.md). Risky actions (managing users, downloading a backup or `export.json`, wiping test data) ask for your password again.
 
 ## How the numbers work
 
@@ -157,9 +178,12 @@ shared/            GST and totals, money, units, search, permissions — used by
 server/db/         schema, migrations, SQLite/Postgres connection (the only database-specific code)
 server/lib/        billing, rates, catalogue, importer, backups, auth helpers
 server/routes/     the HTTP API
-server/scripts/    seed-demo, move-to-postgres
+server/scripts/    seed-demo, move-to-postgres, reset-password, init-env, rotate-key, restore-backup, pg-backup, pg-restore
 web/src/           React screens
-tests/             vitest: GST/units/search rules and full API flows
+scripts/windows/   firewall.bat / firewall.ps1
+tests/             vitest: GST/units/search rules, full API flows, and the security suites (throttle, two-step, secrets, backups, edge, uploads, injection...)
+docs/              REMOTE-ACCESS.md (Cloudflare Tunnel), POSTGRES.md (hosted database)
+SECURITY.md        threat model, rotation, incident checklists, findings
 ```
 
 ## Tests

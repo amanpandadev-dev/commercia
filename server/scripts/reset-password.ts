@@ -5,8 +5,8 @@
 //   npm run reset-password -- ramesh@shop.in "my new pass"    sets the one you give
 //   add --reset-2fa to also switch off the authenticator (lost phone); the person sets it up again at next login
 //   npm run reset-password -- ramesh@shop.in --unlock         lifts the lock after too many wrong tries; changes nothing else
-//   npm run reset-password -- --unlock-all
-//   npm run reset-password -- ramesh@shop.in --enrol-code     a one-time code to set up an authenticator (changes nothing else)                    lifts every lock (every account and address)
+//   npm run reset-password -- --unlock-all                    lifts every lock (every account and address)
+//   npm run reset-password -- ramesh@shop.in --enrol-code     a one-time code to set up an authenticator (changes nothing else)
 import '../lib/boot';
 import crypto from 'node:crypto';
 import { openDb, nowIso } from '../db/index';
