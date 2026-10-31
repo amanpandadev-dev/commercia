@@ -93,7 +93,7 @@ export function AuthenticatorSetup({ canEmail: given, onFinished, footer }: { ca
       <div className="col gap-16">
         <h2 style={{ fontSize: 20 }}>Keep your recovery codes</h2>
         <p className="muted" style={{ margin: 0 }}>If you lose your phone, each of these logs you in once, in place of an authenticator code. They are shown only now. Write them down or print them, and keep them somewhere safe, apart from your phone.</p>
-        <div className="print-area" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontFamily: 'monospace', fontSize: 15, background: 'var(--surface-2, #f3f4f6)', padding: 12, borderRadius: 8 }}>
+        <div className="print-area code-grid">
           {recovery.map((c) => <span key={c}>{c}</span>)}
         </div>
         <div className="row wrap">
@@ -129,7 +129,7 @@ export function AuthenticatorSetup({ canEmail: given, onFinished, footer }: { ca
       </p>
       {qr && (
         <div className="row top">
-          <img src={qr.qr} alt="QR code for your authenticator app" width={160} height={160} style={{ borderRadius: 8, background: '#fff' }} />
+          <img src={qr.qr} alt="QR code for your authenticator app" width={160} height={160} className="qr" />
           <div className="col gap-4">
             <span className="label-sm">Or type this key</span>
             <code style={{ wordBreak: 'break-all', fontSize: 13 }}>{qr.secret.match(/.{1,4}/g)?.join(' ')}</code>

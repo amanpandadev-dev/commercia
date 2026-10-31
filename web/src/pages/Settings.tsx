@@ -55,13 +55,13 @@ export function SettingsPage() {
     <div className="split">
       <div className="col gap-16">
         <div className="card card-pad col">
-          <div className="label-sm" style={{ color: 'var(--accent-text)' }}>{t('Appearance').toUpperCase()}</div>
-          <div className="row between"><span>{t('Theme')}</span><Seg value={theme} onChange={setTheme} options={[{ value: 'light', label: t('Light') }, { value: 'dark', label: t('Dark') }]} /></div>
+          <div className="label-sm section">{t('Appearance').toUpperCase()}</div>
+          <div className="row between"><span>{t('Theme')}</span><Seg value={theme} onChange={setTheme} options={[{ value: 'system', label: t('Automatic') }, { value: 'light', label: t('Light') }, { value: 'dark', label: t('Dark') }]} /></div>
           <div className="row between"><span>{t('Language')}</span><Seg value={lang} onChange={setLang} options={[{ value: 'en', label: 'English' }, { value: 'hi', label: 'हिंदी' }]} /></div>
         </div>
 
         <div className="card card-pad col">
-          <div className="label-sm" style={{ color: 'var(--accent-text)' }}>{t('Printing').toUpperCase()}</div>
+          <div className="label-sm section">{t('Printing').toUpperCase()}</div>
           <div className="row between"><span>{t('Paper size')}</span><Seg value={s.paper} onChange={(v) => edit && save({ paper: v })} options={[{ value: 'A4', label: 'A4' }, { value: 'thermal', label: 'Thermal 80 mm' }]} /></div>
           <div className="grid grid-3">
             <Field label="Receipt prefix"><input className="input" disabled={!edit} value={s.prefix_receipt} onChange={(e) => setS({ ...s, prefix_receipt: e.target.value })} onBlur={() => edit && save({ prefix_receipt: s.prefix_receipt })} /></Field>
@@ -72,7 +72,7 @@ export function SettingsPage() {
         </div>
 
         <div className="card card-pad col">
-          <div className="label-sm" style={{ color: 'var(--accent-text)' }}>{t('Shop').toUpperCase()}</div>
+          <div className="label-sm section">{t('Shop').toUpperCase()}</div>
           <div className="grid grid-2">
             <Field label="Shop name"><input className="input" disabled={!edit} value={s.shop_name} onChange={(e) => setS({ ...s, shop_name: e.target.value })} /></Field>
             <Field label="Shop name (Hindi)"><input className="input" disabled={!edit} value={s.shop_name_hi} onChange={(e) => setS({ ...s, shop_name_hi: e.target.value })} /></Field>
@@ -84,7 +84,7 @@ export function SettingsPage() {
         </div>
 
         <div className="card card-pad col">
-          <div className="label-sm" style={{ color: 'var(--accent-text)' }}>{t('GST scheme').toUpperCase()}</div>
+          <div className="label-sm section">{t('GST scheme').toUpperCase()}</div>
           <div className="row between">
             <span>{t('Prices include GST')}<span className="faint" style={{ display: 'block', fontSize: 12 }}>{s.prices_include_gst === '0' ? 'Bills add GST on top of the price.' : 'Shelf prices (MRP) already contain GST; the bill takes the tax back out.'}</span></span>
             <Seg value={s.prices_include_gst ?? '1'} onChange={(v) => edit && save({ prices_include_gst: v })} options={[{ value: '1', label: 'Yes' }, { value: '0', label: 'No' }]} />
@@ -119,11 +119,11 @@ export function SettingsPage() {
         <PackTypes />
 
         <div className="card card-pad col">
-          <div className="label-sm" style={{ color: 'var(--accent-text)' }}>{t('Security').toUpperCase()}</div>
+          <div className="label-sm section">{t('Security').toUpperCase()}</div>
           {edit && (
-            <label className="check">
-              <input type="checkbox" checked={s.require_2fa === '1'} onChange={(e) => save({ require_2fa: e.target.checked ? '1' : '0' })} />
-              Owners and the Admin must enter an authenticator code at login
+            <label className="switch">
+              <span>Owners and the Admin must enter an authenticator code at login</span>
+              <input type="checkbox" role="switch" checked={s.require_2fa === '1'} onChange={(e) => save({ require_2fa: e.target.checked ? '1' : '0' })} />
             </label>
           )}
           <div className="row wrap">
@@ -142,7 +142,7 @@ export function SettingsPage() {
 
         {can('backup.run') && backup && (
           <div className="card card-pad col">
-            <div className="label-sm" style={{ color: 'var(--accent-text)' }}>{t('Backup').toUpperCase()}</div>
+            <div className="label-sm section">{t('Backup').toUpperCase()}</div>
             <div>Last backup: <b>{s.last_backup_at ? dateTimeOf(s.last_backup_at) : 'never'}</b></div>
             <div className="faint" style={{ fontSize: 12 }}>A copy is saved every night after 9 pm (and at start-up if the last one is over a day old). The last 30 are kept.</div>
             <Field label="Backup folder" hint="Point this at a USB drive or a Google Drive / OneDrive synced folder">
@@ -298,7 +298,7 @@ function PackTypes() {
   };
   return (
     <div className="card card-pad col">
-      <div className="label-sm" style={{ color: 'var(--accent-text)' }}>PACK TYPES</div>
+      <div className="label-sm section">PACK TYPES</div>
       <div className="row wrap gap-4">
         {kinds.map((k) => <span key={k.value} className={`tag ${custom.includes(k.value) ? 'info' : 'neutral'}`}>{k.name}</span>)}
         <span className="tag neutral">Loose</span>

@@ -27,7 +27,8 @@ export const priceFor = (u: CUnit, list: 'retail' | 'wholesale') => (list === 'w
 // Whole-pack items keep the pack's own name ('Bag 25 kg'); other base units read kg, L or pc.
 export const unitShort = (u: CUnit, p: CProduct) => (u.isBase && !p.packKind ? shortBase(p.baseUnit).replace('pcs', 'pc') : u.name);
 
-const COLORS = ['#0e7a6e', '#f08a24', '#7b5bd6', '#3466c2', '#d14d72', '#2f9e5c', '#b8721d', '#1f8fa6', '#6a7a2b'];
+// Apple-like system hues, deep enough for white initials to read.
+const COLORS = ['#0071e3', '#c93400', '#8944ab', '#3634a3', '#d70015', '#248a3d', '#b25000', '#0071a4', '#6e6e73'];
 export function avatarColor(name: string) {
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
