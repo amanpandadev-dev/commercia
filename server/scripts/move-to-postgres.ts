@@ -4,6 +4,7 @@
 //   DATABASE_URL=postgres://… npx tsx server/scripts/move-to-postgres.ts [path/to/commercia.db]
 //
 // The target database must be empty (fresh Supabase project). Nothing in the SQLite file changes.
+import '../lib/boot';
 import fs from 'node:fs';
 import { sql } from 'kysely';
 import { openDb, type Db } from '../db/index';
@@ -11,9 +12,10 @@ import { TABLES } from '../routes/admin';
 import { customerBalances, stockMap } from '../lib/catalog';
 import { toNum } from '../lib/core';
 import { supplierBalances } from '../lib/suppliers';
+import { config } from '../lib/config';
 
 const file = process.argv[2] ?? 'data/commercia.db';
-const url = process.env.DATABASE_URL;
+const url = config().databaseUrl;
 if (!url || !/^postgres/.test(url)) {
   console.error('Set DATABASE_URL to the Supabase Postgres connection string.');
   process.exit(1);

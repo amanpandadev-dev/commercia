@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test:pg": "TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgres://postgres:postgres@localhost:5432/postgres} vitest run",
     "move-to-postgres": "tsx server/scripts/move-to-postgres.ts",
-    "reset-password": "tsx server/scripts/reset-password.ts"
+    "reset-password": "tsx server/scripts/reset-password.ts",
+    "init-env": "tsx server/scripts/init-env.ts"
   },
   "engines": {
     "node": ">=20"

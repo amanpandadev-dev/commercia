@@ -1,3 +1,4 @@
+import './lib/boot';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import fs from 'node:fs';
@@ -6,10 +7,10 @@ import path from 'node:path';
 import { openDb } from './db/index';
 import { createApp } from './app';
 import { scheduleBackups } from './lib/backup';
+import { config } from './lib/config';
 
-const port = Number(process.env.PORT ?? 8787);
-// 0.0.0.0 lets phones on the shop Wi-Fi reach the laptop (PILOT-2); set HOST=127.0.0.1 to keep it to this computer.
-const host = process.env.HOST ?? '0.0.0.0';
+const { port, host } = config();
+// HOST defaults to 0.0.0.0 so phones on the shop Wi-Fi can reach the laptop (PILOT-2); set HOST=127.0.0.1 to keep it to this computer.
 
 const db = await openDb();
 const app = createApp(db);

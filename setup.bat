@@ -30,6 +30,10 @@ call npm run build
 if errorlevel 1 goto :buildfail
 
 echo.
+echo   Secret key
+call npm run init-env --silent
+
+echo.
 echo   [3/3] Database
 if exist "data\commercia.db" goto :keepdb
 echo.

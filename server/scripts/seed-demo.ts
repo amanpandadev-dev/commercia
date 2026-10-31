@@ -1,6 +1,7 @@
 // Fills an empty database with the demo shop from the walkthrough video, for trying Commercia out.
 // Usage: npm run seed:demo   (uses data/commercia.db, or COMMERCIA_DB=path)
 // Logins: ramesh@shop.in (Admin/Owner) and amit@shop.in (Entry person), password "demo1234".
+import '../lib/boot';
 import { openDb, nowIso } from '../db/index';
 import { createApp } from '../app';
 import { hashPassword } from '../lib/crypto';

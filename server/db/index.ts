@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { DB } from './schema';
 import { migrate } from './migrate';
+import { config } from '../lib/config';
 
 export type Dialect = 'sqlite' | 'postgres';
 
@@ -22,7 +23,7 @@ export interface Db {
  */
 export async function openDb(opts: { file?: string; url?: string } = {}): Promise<Db> {
   // An explicit file always means SQLite, even when DATABASE_URL is set.
-  const url = opts.url ?? (opts.file ? undefined : process.env.DATABASE_URL);
+  const url = opts.url ?? (opts.file ? undefined : config().databaseUrl);
   if (url && /^postgres(ql)?:\/\//.test(url)) {
     // `pg` is only needed after go-live: npm i pg
     const pg = (await import(/* @vite-ignore */ 'pg' as string)) as { default: { Pool: new (o: object) => unknown } };
@@ -33,7 +34,7 @@ export async function openDb(opts: { file?: string; url?: string } = {}): Promis
     return { k, dialect: 'postgres' };
   }
 
-  const file = opts.file ?? process.env.COMMERCIA_DB ?? path.resolve('data', 'commercia.db');
+  const file = opts.file ?? config().dbFile ?? path.resolve('data', 'commercia.db');
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const sqlite = new Database(file);
   sqlite.pragma('journal_mode = WAL');

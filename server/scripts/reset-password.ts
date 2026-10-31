@@ -4,6 +4,7 @@
 //   npm run reset-password -- ramesh@shop.in                  makes a new random password and prints it
 //   npm run reset-password -- ramesh@shop.in "my new pass"    sets the one you give
 //   add --reset-2fa to also switch off the authenticator (lost phone); the person sets it up again at next login
+import '../lib/boot';
 import crypto from 'node:crypto';
 import { openDb, nowIso } from '../db/index';
 import { hashPassword } from '../lib/crypto';

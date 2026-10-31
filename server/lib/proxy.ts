@@ -2,8 +2,9 @@
 // computer, so it has to be told to believe the proxy's headers. Off by default: anyone on the Wi-Fi could send them.
 import type { Context } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
+import { config } from './config';
 
-export const trustProxy = () => process.env.TRUST_PROXY === '1';
+export const trustProxy = () => config().trustedProxies.length > 0;
 
 /** Was the browser's connection https? Behind a trusted proxy, ask the proxy. */
 export function isHttps(c: Context): boolean {
