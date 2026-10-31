@@ -316,6 +316,44 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     .addColumn('created_at', 'text', notNull)
     .execute();
 
+  await db.schema
+    .createTable('auth_throttle')
+    .ifNotExists()
+    .addColumn('key', 'text', (c) => c.primaryKey())
+    .addColumn('fails', 'integer', zero)
+    .addColumn('window_start', 'text', notNull)
+    .addColumn('locked_until', 'text')
+    .addColumn('strikes', 'integer', zero)
+    .addColumn('last_fail', 'text', notNull)
+    .execute();
+
+  await idCol(db.schema.createTable('known_devices').ifNotExists())
+    .addColumn('user_id', 'integer', notNull)
+    .addColumn('device_hash', 'text', notNull)
+    .addColumn('label', 'text', empty)
+    .addColumn('first_seen', 'text', notNull)
+    .addColumn('last_seen', 'text', notNull)
+    .addColumn('last_ip', 'text', empty)
+    .execute();
+
+  await idCol(db.schema.createTable('recovery_codes').ifNotExists())
+    .addColumn('user_id', 'integer', notNull)
+    .addColumn('code_hash', 'text', notNull)
+    .addColumn('used_at', 'text')
+    .addColumn('created_at', 'text', notNull)
+    .execute();
+
+  await idCol(db.schema.createTable('enrolment_codes').ifNotExists())
+    .addColumn('user_id', 'integer', notNull)
+    .addColumn('kind', 'text', notNull)
+    .addColumn('code_hash', 'text', notNull)
+    .addColumn('issued_by', 'integer')
+    .addColumn('expires_at', 'text', notNull)
+    .addColumn('attempts', 'integer', zero)
+    .addColumn('used_at', 'text')
+    .addColumn('created_at', 'text', notNull)
+    .execute();
+
   await idCol(db.schema.createTable('password_resets').ifNotExists())
     .addColumn('user_id', 'integer', notNull)
     .addColumn('kind', 'text', notNull)
@@ -362,6 +400,13 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     const t = (await db.introspection.getTables()).find((x) => x.name === table);
     if (t && !t.columns.some((c) => c.name === column)) await db.schema.alterTable(table).addColumn(column, type, build).execute();
   };
+  await addColumnIfMissing('users', 'totp_pending', 'text', (c) => c);
+  await addColumnIfMissing('users', 'totp_last_step', 'integer', (c) => c);
+  await addColumnIfMissing('sessions', 'enrol_ok', 'integer', zero);
+  await addColumnIfMissing('sessions', 'reauth_until', 'text', (c) => c);
+  await addColumnIfMissing('sessions', 'ip', 'text', empty);
+  await addColumnIfMissing('sessions', 'device', 'text', empty);
+  await addColumnIfMissing('sessions', 'ua_hash', 'text', empty);
   await addColumnIfMissing('bill_lines', 'price_override', 'integer', zero);
   await addColumnIfMissing('bills', 'gst_inclusive', 'integer', zero);
   await addColumnIfMissing('products', 'family', 'text', empty);
@@ -405,6 +450,9 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     ['idx_supplier_ledger_supplier', 'supplier_ledger', ['supplier_id']],
     ['idx_cash_outs_supplier', 'cash_outs', ['supplier_id']],
     ['idx_password_resets_user', 'password_resets', ['user_id']],
+    ['idx_recovery_codes_user', 'recovery_codes', ['user_id']],
+    ['idx_known_devices_user', 'known_devices', ['user_id']],
+    ['idx_enrolment_codes_user', 'enrolment_codes', ['user_id']],
     ['idx_versions_entity', 'versions', ['entity', 'entity_id']],
     ['idx_activity_time', 'activity', ['created_at']],
   ];

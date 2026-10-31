@@ -10,7 +10,7 @@
 import crypto from 'node:crypto';
 import type { Tx } from './core';
 import { logActivity } from './core';
-import { hashPassword, sha256 } from './crypto';
+import { hashPasswordAsync, sha256 } from './crypto';
 import { mailConfigured, sendMail } from './mailer';
 import type { User } from '../db/schema';
 
@@ -102,7 +102,7 @@ export async function issueCode(tx: Tx, actor: User, target: User): Promise<{ co
   const issue = { code_hash: hashCode(target.id, code), issued_at: now, issued_by: actor.id, expires_at: expiresAt, attempts: 0, dismissed: 0 };
   if (waiting) await tx.updateTable('password_resets').set(issue).where('id', '=', waiting.id).execute();
   else await tx.insertInto('password_resets').values({ user_id: target.id, kind: 'owner', requested_at: now, used_at: null, ...issue }).execute();
-  await logActivity(tx, actor.id, 'issue', 'password_reset', target.id, `${actor.name} made a password reset code for ${target.name}`);
+  await logActivity(tx, actor.id, 'password_reset', 'user', target.id, `${actor.name} made a password reset code for ${target.name}`);
   return { code: formatCode(code), expiresAt };
 }
 
@@ -127,10 +127,10 @@ export async function redeem(tx: Tx, user: User, rawCode: string, newPassword: s
     await logActivity(tx, user.id, 'login_failed', 'password_reset', user.id, `Wrong password reset code for ${user.name}`);
     return false;
   }
-  await tx.updateTable('users').set({ password_hash: hashPassword(newPassword), session_epoch: user.session_epoch + 1 }).where('id', '=', user.id).execute();
+  await tx.updateTable('users').set({ password_hash: await hashPasswordAsync(newPassword), session_epoch: user.session_epoch + 1 }).where('id', '=', user.id).execute();
   await tx.updateTable('password_resets').set({ used_at: now }).where('id', '=', row.id).execute();
   await tx.updateTable('password_resets').set({ dismissed: 1 }).where('user_id', '=', user.id).where('used_at', 'is', null).execute();
-  await logActivity(tx, user.id, 'update', 'user', user.id, `${user.name} chose a new password with a reset code`);
+  await logActivity(tx, user.id, 'password_reset', 'user', user.id, `${user.name} chose a new password with a reset code`);
   return true;
 }
 

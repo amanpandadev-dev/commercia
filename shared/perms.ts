@@ -35,6 +35,7 @@ export const PERMISSIONS = {
   'rates.approve': ['admin', 'owner'],
   'review.view': ['admin', 'owner'],
   'activity.view': ['admin', 'owner'],
+  'security.view': ['admin', 'owner'], // failed logins, lockouts, exports, resets
   'backup.run': ['admin', 'owner'],
   'data.reset': ['admin'],
 } as const satisfies Record<string, readonly Role[]>;

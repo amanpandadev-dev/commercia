@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppEnv } from '../lib/core';
-import { HttpError, bad, logActivity, need } from '../lib/core';
+import { HttpError, bad, int, logActivity, need, requireReauth } from '../lib/core';
 import { EXAMPLES, FIELDS, commitImport, mapHeaders, previewImport, undoImport, type ImportKind, type RowData } from '../lib/importer';
 import { readSheet, toCsv } from '../lib/sheets';
 import { customPackTypes, getSettings, setSetting, type SchemePeriod } from '../lib/settings';
@@ -179,7 +179,7 @@ admin.get('/import/template/:file', async (c) => {
   }
   if (kind === 'customers') {
     help.addRow(['Sale and Purchase', '', 'Sale: a customer, and what they owe you (the Sales ledger). Purchase: a supplier, and what you owe them (the Purchase ledger). Leave Type empty for Sale.']);
-    help.addRow(['Existing names', '', 'A customer or supplier already in Commercia only gets their details (phone, area) updated; their amount is not added a second time.']);
+    help.addRow(['Existing names', '', 'A customer already in Commercia only gets their details (phone, area) updated. A supplier already in Commercia gets the amount too, unless they already have an opening balance: then only their details are updated, so uploading the same file twice never adds it twice.']);
   }
   help.getColumn(3).alignment = { wrapText: true, vertical: 'top' };
   const buf = await wb.xlsx.writeBuffer();
@@ -248,7 +248,7 @@ admin.get('/imports', async (c) => {
 });
 
 admin.post('/imports/:id/undo', async (c) => {
-  const id = Number(c.req.param('id'));
+  const id = int(c.req.param('id'));
   const me = c.get('user');
   let user = me;
   if (!can(me.role, 'import.undo')) {
@@ -338,12 +338,14 @@ admin.post('/backup/now', async (c) => {
   return c.json(res);
 });
 
-/** Download a copy of the database, e.g. to a USB drive. */
+/** Download a copy of the database, e.g. to a USB drive. It is locked with the secret key like every backup. */
 admin.get('/backup/download', async (c) => {
-  await need(c, 'backup.run');
+  const user = await need(c, 'backup.run');
+  await requireReauth(c);
   const db = c.get('db');
   const res = await runBackup(db);
   const data = fs.readFileSync(res.file);
+  await logActivity(db.k, user.id, 'backup_download', 'database', null, `${user.name} downloaded a backup (${path.basename(res.file)}, ${Math.round(res.size / 1024)} KB)`);
   return new Response(data, {
     headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${path.basename(res.file)}"` },
   });
@@ -357,12 +359,21 @@ const TABLES: (keyof DB)[] = [
 ];
 export { TABLES };
 
+/** Columns that never leave the database in an export: password hashes and authenticator secrets. */
+const NEVER_EXPORTED: Partial<Record<keyof DB, string[]>> = { users: ['password_hash', 'totp_secret'] };
+
 admin.get('/admin/export.json', async (c) => {
   const user = await need(c, 'backup.run');
+  await requireReauth(c);
   const { k } = c.get('db');
   const out: Record<string, unknown[]> = {};
-  for (const t of TABLES) out[t] = await k.selectFrom(t).selectAll().execute();
-  await logActivity(k, user.id, 'export', 'database', null, 'Exported all data');
+  let rows = 0;
+  for (const t of TABLES) {
+    const hide = NEVER_EXPORTED[t] ?? [];
+    out[t] = (await k.selectFrom(t).selectAll().execute()).map((r) => Object.fromEntries(Object.entries(r as Record<string, unknown>).filter(([col]) => !hide.includes(col))));
+    rows += out[t].length;
+  }
+  await logActivity(k, user.id, 'export', 'database', null, `${user.name} exported all data (${rows} rows in ${TABLES.length} tables; no passwords or secrets)`);
   return new Response(JSON.stringify({ app: 'commercia', version: 1, exportedAt: new Date().toISOString(), tables: out }), {
     headers: { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="commercia-export.json"' },
   });
@@ -371,6 +382,7 @@ admin.get('/admin/export.json', async (c) => {
 /** Wipe test data before go-live; users and settings stay (PILOT-7). Admin only, after typing the shop name. */
 admin.post('/admin/reset', async (c) => {
   const user = await need(c, 'data.reset');
+  await requireReauth(c);
   const { confirm } = z.object({ confirm: z.string() }).parse(await c.req.json());
   const db = c.get('db');
   const s = await getSettings(db.k);

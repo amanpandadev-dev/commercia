@@ -20,7 +20,7 @@ if %NODE_ODD%==1 echo   Note: Node %NODE_MAJOR% is not an LTS release. If the in
 echo.
 echo   [1/3] Installing packages. The first time takes a few minutes...
 echo.
-call npm install --no-audit --no-fund
+if exist package-lock.json (call npm ci --no-audit --no-fund) else (call npm install --no-audit --no-fund)
 if errorlevel 1 goto :installfail
 
 echo.
@@ -28,6 +28,10 @@ echo   [2/3] Building the app...
 echo.
 call npm run build
 if errorlevel 1 goto :buildfail
+
+echo.
+echo   Secret key
+call npm run init-env --silent
 
 echo.
 echo   [3/3] Database

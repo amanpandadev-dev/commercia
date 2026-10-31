@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ReceiptText, Wallet, NotebookText, TriangleAlert, PackagePlus, Plus, ClipboardCheck, Tags, Truck, KeyRound } from 'lucide-react';
+import { ReceiptText, Wallet, NotebookText, TriangleAlert, PackagePlus, Plus, ClipboardCheck, Tags, Truck, KeyRound, ShieldAlert } from 'lucide-react';
 import { api } from '../api';
 import { useApp } from '../state';
 import { Bi, Empty } from '../components/ui';
@@ -16,6 +16,7 @@ interface Dash {
   due: number;
   dueCustomers: number;
   passwordRequests: number;
+  security: { failedLogins: number; lockouts: number; locksNow: number } | null;
   payable: number | null;
   payableSuppliers: number;
   low: { id: number; nameEn: string; nameHi: string; stockMilli: number; reorderMilli: number; reorderUnitId: number | null; baseUnit: 'kg' | 'L' | 'pc'; packKind: string; units: { id: number; name: string; factorMilli: number; isBase: boolean }[] }[];
@@ -46,6 +47,15 @@ export function Dashboard() {
 
   return (
     <>
+      {d.security && (d.security.lockouts > 0 || d.security.locksNow > 0 || d.security.failedLogins >= 5) && (
+        <div className="banner danger row wrap">
+          <Link to="/security" className="row" style={{ color: 'inherit' }}>
+            <ShieldAlert size={16} /> <b>{d.security.failedLogins}</b> failed login{d.security.failedLogins === 1 ? '' : 's'} in the last day
+            {d.security.lockouts > 0 && <>, <b>{d.security.lockouts}</b> lockout{d.security.lockouts === 1 ? '' : 's'}</>}
+            {d.security.locksNow > 0 && <> ({d.security.locksNow} in force now)</>}. See Security.
+          </Link>
+        </div>
+      )}
       {d.passwordRequests > 0 && (
         <div className="banner row wrap">
           <Link to="/users" className="row" style={{ color: 'inherit' }}>

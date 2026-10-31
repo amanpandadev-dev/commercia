@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import type { Kysely, Transaction } from 'kysely';
+import { sql, type Kysely, type Transaction } from 'kysely';
 import type { DB, User } from '../db/schema';
 import type { Db } from '../db/index';
 import { nowIso } from '../db/index';
@@ -19,10 +19,12 @@ export type Ctx = Context<AppEnv>;
 
 export class HttpError extends Error {
   constructor(
-    public status: 400 | 401 | 403 | 404 | 409 | 422 | 500,
+    public status: 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 500 | 504,
     message: string,
     public code = 'error',
     public details?: unknown,
+    /** Seconds until trying again is worthwhile (sent as Retry-After). */
+    public retryAfter?: number,
   ) {
     super(message);
   }
@@ -97,3 +99,31 @@ export async function nextCounter(tx: Tx, name: string): Promise<number> {
 }
 
 export const toNum = (v: unknown): number => (v == null ? 0 : Number(v));
+
+export const REAUTH_MINUTES = 5;
+
+/**
+ * For actions that put a lot at risk (managing people, exporting everything, downloading a backup, wiping test data): the
+ * person must have typed their password again in the last few minutes, so a left-open screen or a stolen session is not enough.
+ */
+export async function requireReauth(c: Ctx): Promise<void> {
+  const row = await c.get('db').k.selectFrom('sessions').select('reauth_until').where('id', '=', c.get('sessionId')).executeTakeFirst();
+  if (!row?.reauth_until || Date.parse(row.reauth_until) < Date.now()) throw new HttpError(403, 'Type your password to continue.', 'reauth_required');
+}
+
+/**
+ * "Contains this text, whatever case": for the search boxes. The text is a parameter, never part of the SQL, and the
+ * characters LIKE treats as wildcards (% and _) and its escape character are escaped, so searching for "100%" finds "100%"
+ * and not everything. ESCAPE is written out because SQLite has no default one.
+ */
+export const containsText = (column: string, text: string) => {
+  const pattern = `%${text.toLowerCase().replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+  return sql<boolean>`lower(${sql.ref(column)}) like ${pattern} escape '\\'`;
+};
+
+/** A whole number from a URL (an id, a limit): anything else is the caller's mistake (400), not a crash inside the database. */
+export function int(v: unknown, name = 'value'): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^-?\d{1,15}$/.test(v.trim()) ? Number(v) : Number.NaN;
+  if (!Number.isSafeInteger(n) || Math.abs(n) > 2_147_483_647) throw new HttpError(400, `That is not a valid ${name}.`, 'invalid');
+  return n;
+}

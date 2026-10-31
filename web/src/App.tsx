@@ -13,10 +13,12 @@ import { Ledger } from './pages/Ledger';
 import { Reports } from './pages/Reports';
 import { Review } from './pages/Review';
 import { Rates } from './pages/Rates';
+import { SecurityPage } from './pages/Security';
 import { UsersPage } from './pages/Users';
 import { SettingsPage } from './pages/Settings';
 import { ImportPage } from './pages/Import';
 import { Losses } from './pages/Losses';
+import { PasswordPrompt } from './components/PasswordPrompt';
 
 export function App() {
   const [auth, setAuth] = useState<AuthState | null>(null);
@@ -57,10 +59,13 @@ export function App() {
             <Route path="/rates" element={<Rates />} />
             <Route path="/import" element={<ImportPage />} />
             <Route path="/users" element={<UsersPage />} />
+            <Route path="/security" element={<SecurityPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Layout>
+        {/* After the layout, so it is on top of any dialog that asked for the password */}
+        <PasswordPrompt />
       </AppProvider>
     </BrowserRouter>
   );

@@ -334,8 +334,8 @@ describe('Commercia API', () => {
   });
 
   it('signs out a deactivated user on the next request (AUTH-4)', async () => {
-    const extra = await owner.post('/api/users', { name: 'Temp', email: 'temp@shop.in', role: 'entry', password: 'password123' });
-    const temp = await ctx.client('temp@shop.in');
+    const extra = await owner.post('/api/users', { name: 'Temp', email: 'temp@shop.in', role: 'entry', password: 'Orchid-Lantern-Ridge-4417' });
+    const temp = await ctx.client('temp@shop.in', 'Orchid-Lantern-Ridge-4417');
     expect((await temp.req('GET', '/api/account/me')).status).toBe(200);
     await owner.patch(`/api/users/${extra.id}`, { active: false });
     expect((await temp.req('GET', '/api/account/me')).status).toBe(401);

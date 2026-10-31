@@ -239,7 +239,7 @@ describe('stock deliveries and dues sheets, and the ledgers they feed', () => {
       expect(await customerBalance('Annapurna Traders')).toBe(1000);
     });
 
-    it('only updates the details of a supplier that exists, and does not add the amount twice', async () => {
+    it('only updates the details of a supplier that already has an opening balance', async () => {
       const rows = [{ party: 'Purchase', name: 'annapurna traders', amount: '5000', phone: '96000' }];
       const prev = await owner.post('/api/import/validate', { kind: 'customers', rows });
       expect(prev.rows[0].status).toBe('update');
@@ -249,6 +249,58 @@ describe('stock deliveries and dues sheets, and the ledgers they feed', () => {
       // Undo gives the old phone number back.
       await owner.post(`/api/imports/${(await owner.get('/api/imports'))[0].id}/undo`);
       expect((await supplier('Annapurna Traders')).phone).toBe('97000');
+    });
+
+    describe('a supplier that already exists but has no opening balance', () => {
+      const rows = [{ party: 'Purchase', name: 'Delivery Only Mills', amount: '7000', phone: '95000' }];
+      const asOfDay = addDays(today, -40);
+      const latestImport = async () => (await owner.get('/api/imports'))[0].id;
+      const openings = async (name: string) => (await statement(name)).entries.filter((e: any) => e.kind === 'opening');
+
+      beforeAll(async () => {
+        // Suppliers made by a stock file: they have deliveries, but no opening balance.
+        for (const name of ['Delivery Only Mills', 'Advance Mills']) await owner.post('/api/import/commit', { kind: 'stock', rows: [stock('1', 'Bori', '1000', { supplier: name })], fileName: 'd.xlsx' });
+      });
+
+      it('gets the amount, dated as on the sheet, on top of their deliveries', async () => {
+        expect((await supplier('Delivery Only Mills')).balance).toBe(100000);
+        const prev = await owner.post('/api/import/validate', { kind: 'customers', rows });
+        expect(prev.rows[0].status).toBe('update');
+        expect(prev.rows[0].notes.join(' ')).toMatch(/Already a supplier \(balance ₹1,000.00\) — ₹7,000.00 will be added to what you owe/);
+        const res = await owner.post('/api/import/commit', { kind: 'customers', rows, fileName: 'mills.xlsx', asOf: asOfDay });
+        expect(res.summary).toContain('owed to suppliers ₹7,000.00');
+        expect(await supplier('Delivery Only Mills')).toMatchObject({ balance: 800000, phone: '95000' });
+        expect(await openings('Delivery Only Mills')).toMatchObject([{ date: asOfDay, owed_paise: 700000 }]);
+      });
+
+      it('does not add it a second time when the same file is uploaded again', async () => {
+        const prev = await owner.post('/api/import/validate', { kind: 'customers', rows });
+        expect(prev.rows[0].notes.join(' ')).toMatch(/with an opening balance — only details will be updated, not the amount/);
+        await owner.post('/api/import/commit', { kind: 'customers', rows, fileName: 'mills-again.xlsx', asOf: asOfDay });
+        expect((await supplier('Delivery Only Mills')).balance).toBe(800000);
+        expect(await openings('Delivery Only Mills')).toHaveLength(1);
+        await owner.post(`/api/imports/${await latestImport()}/undo`); // taking that back changes nothing either
+        expect((await supplier('Delivery Only Mills')).balance).toBe(800000);
+      });
+
+      it('takes a negative amount as paid in advance, and Undo reverses it so the file can be used again', async () => {
+        const adv = [{ party: 'Purchase', name: 'Advance Mills', amount: '-1500' }];
+        expect((await owner.post('/api/import/validate', { kind: 'customers', rows: adv })).rows[0].notes.join(' ')).toMatch(/₹1,500.00 paid in advance will be added/);
+        await owner.post('/api/import/commit', { kind: 'customers', rows: adv, fileName: 'adv.xlsx', asOf: asOfDay });
+        expect((await supplier('Advance Mills')).balance).toBe(100000 - 150000);
+        expect(await openings('Advance Mills')).toMatchObject([{ owed_paise: 0, paid_paise: 150000 }]);
+        await owner.post(`/api/imports/${await latestImport()}/undo`);
+        expect((await supplier('Advance Mills')).balance).toBe(100000);
+        // Undone, so it no longer counts as an opening balance.
+        expect((await owner.post('/api/import/validate', { kind: 'customers', rows: adv })).rows[0].notes.join(' ')).toMatch(/paid in advance will be added/);
+      });
+
+      it('adds nothing for an amount of 0', async () => {
+        const zero = [{ party: 'Purchase', name: 'Advance Mills', amount: '0', area: 'Mandi' }];
+        await owner.post('/api/import/commit', { kind: 'customers', rows: zero, fileName: 'zero.xlsx', asOf: asOfDay });
+        expect(await supplier('Advance Mills')).toMatchObject({ balance: 100000, area: 'Mandi' });
+        expect(await openings('Advance Mills')).toHaveLength(1); // only the earlier, reversed one
+      });
     });
 
     it('refuses an unknown type, and two rows for one supplier', async () => {

@@ -51,6 +51,16 @@ export async function supplierEntry(
     .execute();
 }
 
+/**
+ * Suppliers that already have an opening balance on their ledger. One that was put there by an import
+ * which has since been undone does not count: the undo reversed it.
+ */
+export async function suppliersWithOpening(tx: Tx): Promise<Set<number>> {
+  const rows = await tx.selectFrom('supplier_ledger').select(['supplier_id', 'kind', 'ref_type', 'ref_id']).where('kind', 'in', ['opening', 'reversal']).execute();
+  const undone = new Set(rows.filter((r) => r.kind === 'reversal' && r.ref_type === 'import').map((r) => `${r.supplier_id}|${r.ref_id}`));
+  return new Set(rows.filter((r) => r.kind === 'opening' && !(r.ref_type === 'import' && undone.has(`${r.supplier_id}|${r.ref_id}`))).map((r) => r.supplier_id));
+}
+
 /** What we owe each supplier (positive) or what they hold in advance (negative). */
 export async function supplierBalances(tx: Tx, supplierIds?: number[]): Promise<Map<number, number>> {
   let q = tx

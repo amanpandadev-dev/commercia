@@ -4,7 +4,7 @@ import { HttpError, logActivity, saveVersion } from './core';
 import { nowIso } from '../db/index';
 import { categoryPaths, customerBalances, gstOn, priceOn, snapshotProduct, stockMap } from './catalog';
 import { ledgerEntry } from './billing';
-import { supplierBalances, supplierEntry } from './suppliers';
+import { supplierBalances, supplierEntry, suppliersWithOpening } from './suppliers';
 import { saveStockIn } from '../routes/stock';
 import { parseRupees, parseQty, formatRupees, roundHalfUp } from '../../shared/money';
 import { LOOSE_WORD, derivePackName, findPackKind, packOf, packUnitName, parseExtraUnits, parsePackSize, type UnitDef } from '../../shared/units';
@@ -461,6 +461,7 @@ export async function previewImport(tx: Tx, kind: ImportKind, rows: RowData[], o
     const suppliers = await tx.selectFrom('suppliers').select(['id', 'name']).where('active', '=', 1).execute();
     const balances = await customerBalances(tx);
     const owedTo = await supplierBalances(tx);
+    const hasOpening = await suppliersWithOpening(tx);
     // A customer is told apart by name, nickname and area; a supplier by name. Each ledger has its own.
     const key = (d: { party?: string; name: string; nickname?: string; area?: string }) =>
       parseParty(d.party ?? '') === 'purchase' ? `P|${d.name.trim().toLowerCase()}` : `S|${d.name.trim().toLowerCase()}|${(d.nickname ?? '').trim().toLowerCase()}|${(d.area ?? '').trim().toLowerCase()}`;
@@ -491,7 +492,10 @@ export async function previewImport(tx: Tx, kind: ImportKind, rows: RowData[], o
         const match = suppliers.find((e) => e.name.trim().toLowerCase() === (d.name ?? '').trim().toLowerCase());
         if (match) {
           status = 'update';
-          notes.push(`Already a supplier${owedTo.get(match.id) ? ` (balance ${formatRupees(owedTo.get(match.id)!)})` : ''} — only details will be updated, not the amount`);
+          const bal = owedTo.get(match.id) ? ` (balance ${formatRupees(owedTo.get(match.id)!)})` : '';
+          // An existing supplier gets the amount too, once: if they already have an opening balance, a second file must not add it again.
+          if (hasOpening.has(match.id)) notes.push(`Already a supplier${bal} with an opening balance — only details will be updated, not the amount`);
+          else if (!Number.isNaN(amt) && amt !== 0) notes.push(`Already a supplier${bal} — ${amt > 0 ? `${formatRupees(amt)} will be added to what you owe` : `${formatRupees(-amt)} paid in advance will be added`}`);
         } else if (!Number.isNaN(amt) && amt < 0) notes.push(`Paid in advance ${formatRupees(-amt)}`);
       } else {
         const match = existing.find((e) => key({ ...e, party: 'sale' }) === key({ ...d, name: d.name ?? '' }));
@@ -708,6 +712,7 @@ export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: R
     const asOf = opts.asOf && isIsoDate(opts.asOf) ? opts.asOf : today;
     const existing = await tx.selectFrom('customers').selectAll().where('active', '=', 1).execute();
     const suppliers = await tx.selectFrom('suppliers').selectAll().where('active', '=', 1).execute();
+    const hasOpening = await suppliersWithOpening(tx);
     let total = 0;
     let owedToSuppliers = 0;
     for (const r of preview.rows) {
@@ -720,20 +725,23 @@ export async function commitImport(tx: Tx, user: User, kind: ImportKind, rows: R
         const area = (d.area ?? '').trim();
         const match = suppliers.find((e) => e.name.trim().toLowerCase() === name.toLowerCase());
         let sid: number;
+        // The opening balance goes on a new supplier, and on an existing one that has none yet (a supplier made by a stock file, say).
+        let opening = amt !== 0;
         if (match) {
           sid = match.id;
           undo.updatedSuppliers!.push({ id: sid, data: { ...match } });
           await tx.updateTable('suppliers').set({ phone: phone || match.phone, area: area || match.area }).where('id', '=', sid).execute();
+          opening = opening && !hasOpening.has(sid);
         } else {
           sid = (await tx.insertInto('suppliers').values({ name, phone, area, active: 1, created_at: now }).returning('id').executeTakeFirstOrThrow()).id;
           undo.createdSuppliers!.push(sid);
-          if (amt !== 0) {
-            await supplierEntry(tx, user, {
-              supplierId: sid, date: asOf, kind: 'opening', refType: 'import', refId: imp.id,
-              owed: amt > 0 ? amt : 0, paid: amt < 0 ? -amt : 0, note: `Opening balance as on ${formatDate(asOf)}`,
-            });
-            owedToSuppliers += amt;
-          }
+        }
+        if (opening) {
+          await supplierEntry(tx, user, {
+            supplierId: sid, date: asOf, kind: 'opening', refType: 'import', refId: imp.id,
+            owed: amt > 0 ? amt : 0, paid: amt < 0 ? -amt : 0, note: `Opening balance as on ${formatDate(asOf)}`,
+          });
+          owedToSuppliers += amt;
         }
         continue;
       }

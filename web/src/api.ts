@@ -13,7 +13,37 @@ export const onAuthLost = (fn: Listener) => {
   };
 };
 
-async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+// Risky actions (managing people, exports, backup downloads, wiping data) ask for the password again. The screen registers a
+// prompt here; the call that was refused is then tried once more.
+let askPassword: ((problem?: string) => Promise<string | null>) | null = null;
+export const onPasswordNeeded = (fn: typeof askPassword) => {
+  askPassword = fn;
+  return () => {
+    if (askPassword === fn) askPassword = null;
+  };
+};
+
+async function retryAfterReauth<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.code !== 'reauth_required' || !askPassword) throw e;
+    let problem: string | undefined;
+    for (;;) {
+      const password = await askPassword(problem);
+      if (password === null) throw e;
+      try {
+        await rawRequest('POST', '/api/account/reauth', { password });
+        return await run();
+      } catch (e2) {
+        if (e2 instanceof ApiError && e2.code === 'bad_credentials') problem = e2.message;
+        else throw e2;
+      }
+    }
+  }
+}
+
+async function rawRequest<T>(method: string, url: string, body?: unknown): Promise<T> {
   const isForm = body instanceof FormData;
   let res: Response;
   try {
@@ -41,6 +71,8 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return data as T;
 }
 
+const request = <T>(method: string, url: string, body?: unknown) => retryAfterReauth(() => rawRequest<T>(method, url, body));
+
 export const api = {
   get: <T = any>(url: string) => request<T>('GET', url),
   post: <T = any>(url: string, body: unknown = {}) => request<T>('POST', url, body),
@@ -49,7 +81,9 @@ export const api = {
 };
 
 /** Download a file from a POST that returns a blob (Excel exports). */
-export async function download(url: string, body?: unknown, fallbackName = 'export') {
+export const download = (url: string, body?: unknown, fallbackName = 'export') => retryAfterReauth(() => downloadOnce(url, body, fallbackName));
+
+async function downloadOnce(url: string, body?: unknown, fallbackName = 'export') {
   const res = await fetch(url, {
     method: body === undefined ? 'GET' : 'POST',
     credentials: 'same-origin',

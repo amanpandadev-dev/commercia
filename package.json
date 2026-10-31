@@ -14,7 +14,12 @@
     "typecheck": "tsc --noEmit",
     "test:pg": "TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgres://postgres:postgres@localhost:5432/postgres} vitest run",
     "move-to-postgres": "tsx server/scripts/move-to-postgres.ts",
-    "reset-password": "tsx server/scripts/reset-password.ts"
+    "reset-password": "tsx server/scripts/reset-password.ts",
+    "init-env": "tsx server/scripts/init-env.ts",
+    "rotate-key": "tsx server/scripts/rotate-key.ts",
+    "restore-backup": "tsx server/scripts/restore-backup.ts",
+    "pg-backup": "tsx server/scripts/pg-backup.ts",
+    "pg-restore": "tsx server/scripts/pg-restore.ts"
   },
   "engines": {
     "node": ">=20"
@@ -25,7 +30,7 @@
     "exceljs": "^4.4.0",
     "hono": "^4.13.13",
     "kysely": "^0.29.6",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "^10.3.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -49,5 +54,8 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.4"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }

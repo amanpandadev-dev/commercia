@@ -18,6 +18,8 @@ export interface Client {
 async function freshDb(): Promise<Db> {
   const base = process.env.TEST_DATABASE_URL;
   if (!base) return openDb({ file: ':memory:' });
+  // With Postgres there is no key file: the key must come from the environment, as it will on a real host.
+  process.env.COMMERCIA_SECRET_KEY ??= 'c0'.repeat(32);
   const pg = (await import('pg')).default;
   const name = `commercia_t_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
   const admin = new pg.Client({ connectionString: base });
@@ -31,7 +33,8 @@ async function freshDb(): Promise<Db> {
 
 export async function setup() {
   const db: Db = await freshDb();
-  const app = createApp(db);
+  // The brakes on how often one visitor may call are tested on their own (tests/edge.test.ts); here they must not get in the way.
+  const app = createApp(db, { limits: { global: 1e6, auth: 1e6, reset: 1e6, imports: 1e6, exports: 1e6 } });
   await setSetting(db.k, 'require_2fa', '0');
   await setSetting(db.k, 'shop_name', 'Sharma Kirana Store');
   // The older tests were written for prices before tax; tests of inclusive prices switch this on.
@@ -46,9 +49,9 @@ export async function setup() {
   await mk('Sunil Sharma', 'sunil@shop.in', 'owner');
   await mk('Amit Kumar', 'amit@shop.in', 'entry');
 
-  const client = async (email: string): Promise<Client> => {
+  const client = async (email: string, password = 'password123'): Promise<Client> => {
     let cookie = '';
-    const req = async (method: string, url: string, body?: unknown) => {
+    const send = async (method: string, url: string, body?: unknown) => {
       const res = await app.request(url, {
         method,
         headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
@@ -65,12 +68,21 @@ export async function setup() {
       }
       return { status: res.status, json };
     };
+    // Like the app's screen: when a risky action asks for the password again, type it and go on.
+    const req = async (method: string, url: string, body?: unknown) => {
+      const r = await send(method, url, body);
+      if (r.status === 403 && r.json?.code === 'reauth_required') {
+        await send('POST', '/api/account/reauth', { password });
+        return send(method, url, body);
+      }
+      return r;
+    };
     const ok = async (method: string, url: string, body?: unknown) => {
       const r = await req(method, url, body);
       if (r.status >= 400) throw new Error(`${method} ${url} → ${r.status}: ${JSON.stringify(r.json)}`);
       return r.json;
     };
-    const login = await req('POST', '/api/auth/login', { email, password: 'password123' });
+    const login = await req('POST', '/api/auth/login', { email, password });
     if (login.status !== 200) throw new Error(`login failed ${JSON.stringify(login.json)}`);
     return { req, get: (u) => ok('GET', u), post: (u, b) => ok('POST', u, b ?? {}), patch: (u, b) => ok('PATCH', u, b ?? {}) };
   };

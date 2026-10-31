@@ -19,6 +19,10 @@ export interface UsersTable {
   lang: string;
   totp_secret: string | null;
   totp_enabled: number;
+  /** A new authenticator being set up: it replaces totp_secret only when its first code is confirmed. */
+  totp_pending: Generated<string | null>;
+  /** The time step of the last authenticator code accepted: a code is never accepted twice. */
+  totp_last_step: Generated<number | null>;
   /** Bumped on deactivate / sign out everywhere; sessions older than it die. */
   session_epoch: number;
   created_at: string;
@@ -29,9 +33,50 @@ export interface SessionsTable {
   user_id: number;
   epoch: number;
   totp_ok: number;
+  /** 1 once this session has proved it may set up an authenticator (an enrolment code, or first-time setup). */
+  enrol_ok: Generated<number>;
+  /** Until when a recent password check counts for sensitive actions. */
+  reauth_until: Generated<string | null>;
+  ip: Generated<string>;
+  /** "Chrome on Windows" and the like, from the browser's own description. */
+  device: Generated<string>;
+  ua_hash: Generated<string>;
   created_at: string;
   last_seen: string;
   expires_at: string;
+}
+
+/** Browsers a person has logged in from (told apart by a long-lived cookie), so a login from a new one can be noticed. */
+export interface KnownDevicesTable {
+  id: Generated<number>;
+  user_id: number;
+  device_hash: string;
+  label: string;
+  first_seen: string;
+  last_seen: string;
+  last_ip: string;
+}
+
+/** One-use codes to get back in without the phone. Only a hash is kept. */
+export interface RecoveryCodesTable {
+  id: Generated<number>;
+  user_id: number;
+  code_hash: string;
+  used_at: string | null;
+  created_at: string;
+}
+
+/** One-time codes that allow a person to set up an authenticator: emailed to them, or issued by an Admin or Owner. */
+export interface EnrolmentCodesTable {
+  id: Generated<number>;
+  user_id: number;
+  kind: 'email' | 'admin';
+  code_hash: string;
+  issued_by: number | null;
+  expires_at: string;
+  attempts: number;
+  used_at: string | null;
+  created_at: string;
 }
 
 export interface CategoriesTable {
@@ -357,6 +402,17 @@ export interface PasswordResetsTable {
   dismissed: number;
 }
 
+/** Wrong passwords, codes and the like, counted per account and per address. See lib/throttle.ts. */
+export interface AuthThrottleTable {
+  key: string;
+  fails: number;
+  window_start: string;
+  locked_until: string | null;
+  /** How many times this key has been locked lately: each lock is longer than the last. */
+  strikes: number;
+  last_fail: string;
+}
+
 export interface ActivityTable {
   id: Generated<number>;
   user_id: number | null;
@@ -419,6 +475,10 @@ export interface DB {
   suppliers: SuppliersTable;
   supplier_ledger: SupplierLedgerTable;
   password_resets: PasswordResetsTable;
+  auth_throttle: AuthThrottleTable;
+  known_devices: KnownDevicesTable;
+  recovery_codes: RecoveryCodesTable;
+  enrolment_codes: EnrolmentCodesTable;
   activity: ActivityTable;
   versions: VersionsTable;
   imports: ImportsTable;
