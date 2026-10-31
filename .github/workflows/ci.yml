@@ -87,6 +87,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the whole history: a secret removed later is still in it
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
