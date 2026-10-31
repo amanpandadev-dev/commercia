@@ -28,7 +28,7 @@ This note is for whoever picks up Commercia next. It covers what's built, how it
 ## 2. Run it
 
 ```bash
-npm install
+npm ci
 npm run seed:demo        # optional: the demo shop from the video
 npm start                # build + serve on http://localhost:8787 (and the shop Wi-Fi address)
 npm run dev              # development: API on :8787 with reload, Vite on :5173
@@ -256,7 +256,7 @@ Phone + OTP login, photos, voice search, physical count, monthly profit, restori
 - **Product matching on import** uses Code, then the English name, case-insensitive. The PRD says "name + pack size"; here the pack size is part of the name ("Tea 250g"), so two products differing only in pack must have different names or codes.
 - **Version numbers under heavy concurrency.** `saveVersion()` uses max+1 without a lock, so two simultaneous edits of the *same* record on Postgres could produce duplicate version numbers. The content is still kept. Add a unique index plus a retry if this ever matters.
 - **Dates in pickers** follow the browser's locale (mm/dd in the US-locale test browser, dd/mm on Indian Chrome). Displayed dates use DD-MM-YYYY.
-- **`npm start` needs devDependencies** (tsx, vite), so a plain `npm install` is required; `npm install --production` won't do. `npm run test:pg` uses bash syntax, so it doesn't work on Windows.
+- **`npm start` needs devDependencies** (tsx, vite), so a full `npm ci` (or `npm install`) is required; `npm ci --omit=dev` won't do. `npm run test:pg` uses bash syntax, so it doesn't work on Windows.
 - **`pg` is a devDependency.** Anyone running on Postgres must run `npm i pg` (the README says so). Move it to `dependencies` at go-live.
 
 ---

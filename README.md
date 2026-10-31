@@ -12,7 +12,7 @@ Stock, bills, GST, payments and the customer khata for one kirana shop, in one p
 Needs Node.js 20 or newer.
 
 ```bash
-npm install
+npm ci
 npm run seed:demo   # optional: the "Sharma Kirana Store" demo shop from the video
 npm start           # builds the web app and serves it on http://localhost:8787
 ```
