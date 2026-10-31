@@ -4,17 +4,27 @@
 //   npm run reset-password -- ramesh@shop.in                  makes a new random password and prints it
 //   npm run reset-password -- ramesh@shop.in "my new pass"    sets the one you give
 //   add --reset-2fa to also switch off the authenticator (lost phone); the person sets it up again at next login
+//   npm run reset-password -- ramesh@shop.in --unlock         lifts the lock after too many wrong tries; changes nothing else
+//   npm run reset-password -- --unlock-all                    lifts every lock (every account and address)
 import '../lib/boot';
 import crypto from 'node:crypto';
 import { openDb, nowIso } from '../db/index';
 import { hashPassword } from '../lib/crypto';
 import { logActivity } from '../lib/core';
+import { unlockEverything, unlockUser } from '../lib/throttle';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const reset2fa = process.argv.includes('--reset-2fa');
 const [email, given] = args;
+if (process.argv.includes('--unlock-all')) {
+  const db = await openDb();
+  const n = await unlockEverything(db.k);
+  await logActivity(db.k, null, 'update', 'security', null, `All login locks lifted from the shop computer (${n} lock record(s) cleared)`);
+  console.log(`\n  Every lock is lifted (${n} cleared).\n`);
+  process.exit(0);
+}
 if (!email) {
-  console.error('Usage: npm run reset-password -- <email> [new password] [--reset-2fa]');
+  console.error('Usage: npm run reset-password -- <email> [new password] [--reset-2fa]\n       npm run reset-password -- <email> --unlock\n       npm run reset-password -- --unlock-all');
   process.exit(1);
 }
 if (given && given.length < 8) {
@@ -27,6 +37,12 @@ const user = await db.k.selectFrom('users').selectAll().where('email', '=', emai
 if (!user) {
   console.error(`No user with the email ${email}. Check ${db.file ?? 'the database'} is the right one.`);
   process.exit(1);
+}
+if (process.argv.includes('--unlock')) {
+  const n = await unlockUser(db.k, user.id);
+  await logActivity(db.k, null, 'update', 'security', user.id, `Locks on ${user.name} lifted from the shop computer`);
+  console.log(`\n  ${user.name} (${user.email}) can try again now (${n} lock record(s) cleared). Their password was not changed.\n`);
+  process.exit(0);
 }
 const letters = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const password = given ?? Array.from({ length: 12 }, () => letters[crypto.randomInt(letters.length)]).join('');

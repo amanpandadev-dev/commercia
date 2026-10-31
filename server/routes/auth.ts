@@ -8,7 +8,8 @@ import { hashPassword, newTotpSecret, randomToken, sha256, verifyPassword, verif
 import { nowIso } from '../db/index';
 import { getSettings, setSetting } from '../lib/settings';
 import { readTotpSecret, sealTotpSecret } from '../lib/secrets';
-import { AttemptLimiter } from '../lib/rateLimit';
+import { POLICY, accountKey, addressKey, checkThrottle, clearThrottle, recordFailure, type Policy } from '../lib/throttle';
+import { raiseAlert } from '../lib/alerts';
 import { clientIp, isHttps } from '../lib/proxy';
 import { askForReset, issueCode, pendingRequests, redeem, tellPasswordChanged } from '../lib/passwordReset';
 import type { User } from '../db/schema';
@@ -92,10 +93,31 @@ async function startSession(c: Parameters<MiddlewareHandler<AppEnv>>[0], user: U
   });
 }
 
-// 5 wrong passwords in 15 minutes lock the account for 15 minutes; 30 from one address lock that address. 5 wrong authenticator codes lock the codes.
-const loginAccount = new AttemptLimiter(5, 15 * 60_000, 15 * 60_000);
-const loginAddress = new AttemptLimiter(30, 15 * 60_000, 15 * 60_000);
-const codeAttempts = new AttemptLimiter(5, 10 * 60_000, 15 * 60_000);
+type Ctx = Parameters<MiddlewareHandler<AppEnv>>[0];
+
+let dummyHash = '';
+/** Refuses while any of these keys is locked. A refused password attempt still costs the same time as a real one. */
+async function refuseIfLocked(c: Ctx, keys: string[], password?: string) {
+  const { k } = c.get('db');
+  try {
+    for (const key of keys) await checkThrottle(k, key);
+  } catch (e) {
+    if (password !== undefined) verifyPassword(password, (dummyHash ||= hashPassword('x')));
+    throw e;
+  }
+}
+
+/** Counts a wrong try against each key, and tells the Owners and the Admin when one of them causes a lock. */
+async function countFailure(c: Ctx, tries: { key: string; policy: Policy; what: string }[]) {
+  const { k } = c.get('db');
+  for (const t of tries) {
+    const f = await recordFailure(k, t.key, t.policy);
+    if (f.locked) {
+      const mins = Math.round((Date.parse(f.until!) - Date.now()) / 60000);
+      await raiseAlert(k, { action: 'lockout', summary: `${t.what} was locked for ${mins} minutes after repeated wrong tries (from ${clientIp(c)})`, email: true, dedupe: `lockout:${t.key}` });
+    }
+  }
+}
 
 const passwordSchema = z.string().min(8, 'Password must be at least 8 characters');
 
@@ -164,19 +186,20 @@ auth.post('/login', async (c) => {
   else throw bad('Choose a user');
   const user = await q.executeTakeFirst();
   // Wrong passwords lock the account (also for names that are not users) and the address for a while.
-  const who = `login:${user?.id ?? `?${(body.email ?? '').toLowerCase()}`}`;
-  const from = `login-ip:${clientIp(c)}`;
-  loginAccount.check(who);
-  loginAddress.check(from);
+  const who = accountKey(user, body.email);
+  const from = addressKey(clientIp(c));
+  await refuseIfLocked(c, [who, from], body.password);
   // Same work whether or not the user exists, so timing doesn't reveal accounts.
-  const ok = user ? verifyPassword(body.password, user.password_hash) : (verifyPassword(body.password, hashPassword('x')), false);
+  const ok = user ? verifyPassword(body.password, user.password_hash) : (verifyPassword(body.password, (dummyHash ||= hashPassword('x'))), false);
   if (!user || !ok) {
-    loginAccount.fail(who);
-    loginAddress.fail(from);
-    await logActivity(k, user?.id ?? null, 'login_failed', 'user', user?.id ?? null, `Wrong password for ${user?.name ?? body.email ?? '?'}`);
+    await logActivity(k, user?.id ?? null, 'login_failed', 'user', user?.id ?? null, `Wrong password for ${user?.name ?? body.email ?? '?'} (from ${clientIp(c)})`);
+    await countFailure(c, [
+      { key: who, policy: POLICY.account, what: user ? `${user.name}'s account` : `A login name that is not a user (${(body.email ?? '?').slice(0, 60)})` },
+      { key: from, policy: POLICY.address, what: `The address ${clientIp(c)}` },
+    ]);
     throw new HttpError(401, 'Wrong password', 'bad_credentials');
   }
-  loginAccount.clear(who);
+  await clearThrottle(k, who);
   await startSession(c, user);
   await logActivity(k, user.id, 'login', 'user', user.id, `${user.name} logged in`);
   const s = await getSettings(k);
@@ -198,6 +221,10 @@ const findPerson = async (c: Parameters<MiddlewareHandler<AppEnv>>[0], who: z.in
 auth.post('/forgot', async (c) => {
   const who = whoSchema.parse(await c.req.json());
   const { k } = c.get('db');
+  // Each request counts (it cannot "fail"), per address and per name, so the button cannot be used to flood anyone's inbox or Owners' list.
+  const guard = [`forgot-ip:${clientIp(c)}`, `forgot:${who.userId ?? (who.email ?? '').trim().toLowerCase().slice(0, 120)}`];
+  await refuseIfLocked(c, guard);
+  for (const key of guard) await recordFailure(k, key, POLICY.reset);
   const user = await findPerson(c, who);
   const via = await askForReset(k, user, (await getSettings(k)).shop_name);
   await logActivity(k, user?.id ?? null, 'password_forgot', 'user', user?.id ?? null, user ? `${user.name} asked to reset their password (${via})` : `Password reset asked for someone who is not a user (${who.email ?? who.userId})`);
@@ -209,8 +236,17 @@ auth.post('/reset', async (c) => {
   const body = whoSchema.extend({ code: z.string().min(1), password: passwordSchema }).parse(await c.req.json());
   const { k } = c.get('db');
   const user = await findPerson(c, body);
+  const guard = [`reset:${user ? `u${user.id}` : `e${(body.email ?? '').trim().toLowerCase().slice(0, 120)}`}`, addressKey(clientIp(c))];
+  await refuseIfLocked(c, guard);
   const ok = user ? await k.transaction().execute((tx) => redeem(tx, user, body.code, body.password)) : false;
-  if (!user || !ok) throw new HttpError(400, 'That code did not work or has expired. Ask for a new one.', 'bad_code');
+  if (!user || !ok) {
+    await countFailure(c, [
+      { key: guard[0], policy: POLICY.code, what: user ? `${user.name}'s password reset codes` : 'A password reset for a name that is not a user' },
+      { key: guard[1], policy: POLICY.address, what: `The address ${clientIp(c)}` },
+    ]);
+    throw new HttpError(400, 'That code did not work or has expired. Ask for a new one.', 'bad_code');
+  }
+  await clearThrottle(k, guard[0]);
   await tellPasswordChanged(user, (await getSettings(k)).shop_name);
   return c.json({ ok: true });
 });
@@ -224,14 +260,18 @@ async function partialSession(c: Parameters<MiddlewareHandler<AppEnv>>[0]) {
 auth.post('/totp/verify', async (c) => {
   const { code } = z.object({ code: z.string() }).parse(await c.req.json());
   const { s, user } = await partialSession(c);
-  codeAttempts.check(`code:${user.id}`);
+  const guardKeys = [`code:u${user.id}`, addressKey(clientIp(c))];
+  await refuseIfLocked(c, guardKeys);
   const secret = readTotpSecret(c.get('db').secrets, user);
   if (!secret || user.totp_enabled !== 1 || !verifyTotp(secret, code)) {
-    codeAttempts.fail(`code:${user.id}`);
-    await logActivity(c.get('db').k, user.id, 'login_failed', 'user', user.id, `Wrong authenticator code for ${user.name}`);
+    await logActivity(c.get('db').k, user.id, 'login_failed', 'user', user.id, `Wrong authenticator code for ${user.name} (from ${clientIp(c)})`);
+    await countFailure(c, [
+      { key: guardKeys[0], policy: POLICY.code, what: `${user.name}'s authenticator codes` },
+      { key: guardKeys[1], policy: POLICY.address, what: `The address ${clientIp(c)}` },
+    ]);
     throw new HttpError(401, 'Wrong code', 'bad_totp');
   }
-  codeAttempts.clear(`code:${user.id}`);
+  await clearThrottle(c.get('db').k, guardKeys[0]);
   await c.get('db').k.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();
   return c.json({ ok: true });
 });
@@ -251,13 +291,17 @@ auth.post('/totp/enroll', async (c) => {
 auth.post('/totp/confirm', async (c) => {
   const { code } = z.object({ code: z.string() }).parse(await c.req.json());
   const { s, user } = await partialSession(c);
-  codeAttempts.check(`code:${user.id}`);
+  const guardKeys = [`code:u${user.id}`, addressKey(clientIp(c))];
+  await refuseIfLocked(c, guardKeys);
   const pending = readTotpSecret(c.get('db').secrets, user);
   if (!pending || !verifyTotp(pending, code)) {
-    codeAttempts.fail(`code:${user.id}`);
+    await countFailure(c, [
+      { key: guardKeys[0], policy: POLICY.code, what: `${user.name}'s authenticator codes` },
+      { key: guardKeys[1], policy: POLICY.address, what: `The address ${clientIp(c)}` },
+    ]);
     throw new HttpError(400, 'That code did not match', 'bad_totp');
   }
-  codeAttempts.clear(`code:${user.id}`);
+  await clearThrottle(c.get('db').k, guardKeys[0]);
   const { k } = c.get('db');
   await k.updateTable('users').set({ totp_enabled: 1 }).where('id', '=', user.id).execute();
   await k.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();

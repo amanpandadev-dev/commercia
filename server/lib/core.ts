@@ -23,6 +23,8 @@ export class HttpError extends Error {
     message: string,
     public code = 'error',
     public details?: unknown,
+    /** Seconds until trying again is worthwhile (sent as Retry-After). */
+    public retryAfter?: number,
   ) {
     super(message);
   }

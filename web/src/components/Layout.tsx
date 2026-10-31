@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutGrid, Package, PackagePlus, ReceiptText, BookOpen, BarChart3, Users, Settings, Menu, Search, Sun, Moon,
-  ClipboardCheck, Tags, FileSpreadsheet, FileText, LogOut, TriangleAlert,
+  ClipboardCheck, Tags, FileSpreadsheet, FileText, LogOut, TriangleAlert, ShieldAlert,
 } from 'lucide-react';
 import { useApp } from '../state';
 import { Avatar, Seg } from './ui';
@@ -31,12 +31,13 @@ const NAV: NavItem[] = [
   { to: '/review', en: 'Review', icon: <ClipboardCheck size={18} />, perm: 'review.view', badge: 'review' },
   { to: '/import', en: 'Import', icon: <FileSpreadsheet size={18} />, perm: 'import.stock' },
   { to: '/users', en: 'Users', icon: <Users size={18} />, perm: 'users.manage' },
+  { to: '/security', en: 'Security', icon: <ShieldAlert size={18} />, perm: 'security.view' },
   { to: '/settings', en: 'Settings', icon: <Settings size={18} /> },
 ];
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard', '/inventory': 'Inventory', '/stock-in': 'Stock In', '/billing': 'New Bill', '/bills': 'Bills', '/ledger': 'Ledger',
-  '/reports': 'Reports', '/review': 'Review', '/rates': 'Update rates', '/users': 'Users & Activity', '/settings': 'Settings', '/import': 'Import', '/losses': 'Losses',
+  '/reports': 'Reports', '/review': 'Review', '/rates': 'Update rates', '/users': 'Users & Activity', '/security': 'Security', '/settings': 'Settings', '/import': 'Import', '/losses': 'Losses',
 };
 
 export function Layout({ shopName, children }: { shopName: string; children: ReactNode }) {

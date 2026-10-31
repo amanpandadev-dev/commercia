@@ -357,6 +357,17 @@ export interface PasswordResetsTable {
   dismissed: number;
 }
 
+/** Wrong passwords, codes and the like, counted per account and per address. See lib/throttle.ts. */
+export interface AuthThrottleTable {
+  key: string;
+  fails: number;
+  window_start: string;
+  locked_until: string | null;
+  /** How many times this key has been locked lately: each lock is longer than the last. */
+  strikes: number;
+  last_fail: string;
+}
+
 export interface ActivityTable {
   id: Generated<number>;
   user_id: number | null;
@@ -419,6 +430,7 @@ export interface DB {
   suppliers: SuppliersTable;
   supplier_ledger: SupplierLedgerTable;
   password_resets: PasswordResetsTable;
+  auth_throttle: AuthThrottleTable;
   activity: ActivityTable;
   versions: VersionsTable;
   imports: ImportsTable;

@@ -10,6 +10,7 @@ import { roundHalfUp } from '../../shared/money';
 import { baseLabel, stockLabel } from '../../shared/units';
 import { can } from '../../shared/perms';
 import { supplierBalances } from '../lib/suppliers';
+import { securitySummary } from '../lib/securityEvents';
 import { pendingRequests } from '../lib/passwordReset';
 
 export const reports = new Hono<AppEnv>();
@@ -133,6 +134,7 @@ reports.get('/dashboard', async (c) => {
     payable,
     payableSuppliers,
     passwordRequests,
+    security: can(c.get('user').role, 'security.view') ? await securitySummary(k) : null,
     low,
     days,
     recent: recent.map((r) => ({ ...r, modes: [...new Set(recentParts.filter((p) => p.bill_id === r.id).map((p) => p.mode))] })),

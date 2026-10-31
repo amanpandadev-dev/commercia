@@ -316,6 +316,17 @@ export async function migrate(db: Kysely<DB>, dialect: Dialect): Promise<void> {
     .addColumn('created_at', 'text', notNull)
     .execute();
 
+  await db.schema
+    .createTable('auth_throttle')
+    .ifNotExists()
+    .addColumn('key', 'text', (c) => c.primaryKey())
+    .addColumn('fails', 'integer', zero)
+    .addColumn('window_start', 'text', notNull)
+    .addColumn('locked_until', 'text')
+    .addColumn('strikes', 'integer', zero)
+    .addColumn('last_fail', 'text', notNull)
+    .execute();
+
   await idCol(db.schema.createTable('password_resets').ifNotExists())
     .addColumn('user_id', 'integer', notNull)
     .addColumn('kind', 'text', notNull)

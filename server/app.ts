@@ -11,6 +11,7 @@ import { stock } from './routes/stock';
 import { suppliers } from './routes/suppliers';
 import { reports } from './routes/reports';
 import { admin } from './routes/admin';
+import { security } from './routes/security';
 
 /** The API. Kept free of Node-only serving so it can also run on Cloudflare Workers later. */
 export function createApp(db: Db) {
@@ -25,7 +26,10 @@ export function createApp(db: Db) {
   });
 
   app.onError((err, c) => {
-    if (err instanceof HttpError) return c.json({ error: err.message, code: err.code, details: err.details }, err.status);
+    if (err instanceof HttpError) {
+      if (err.retryAfter) c.header('Retry-After', String(err.retryAfter));
+      return c.json({ error: err.message, code: err.code, details: err.details }, err.status);
+    }
     if (err instanceof ZodError) {
       const first = err.issues[0];
       return c.json({ error: first ? `${first.path.join('.') || 'input'}: ${first.message}` : 'Invalid input', code: 'invalid', details: err.issues }, 400);
@@ -47,6 +51,7 @@ export function createApp(db: Db) {
   api.route('/', suppliers);
   api.route('/', reports);
   api.route('/', admin);
+  api.route('/', security);
   app.route('/api', api);
 
   return app;

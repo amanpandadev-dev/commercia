@@ -35,6 +35,7 @@ describe('forgot password', () => {
     outbox = [];
     setMailer(null);
     await ctx.db.k.deleteFrom('password_resets').execute();
+    await ctx.db.k.deleteFrom('auth_throttle').execute(); // these tests are about the code's own rules; the lockouts have their own tests
     await ctx.db.k.updateTable('users').set({ password_hash: hashPassword('password123') }).execute();
   });
   afterEach(() => setMailer(null));
@@ -93,6 +94,9 @@ describe('forgot password', () => {
       await forgot('entry');
       const { code } = await owner.post(`/api/users/${ids.entry}/reset-code`);
       for (let i = 0; i < 5; i++) expect((await pub('/api/auth/reset', { userId: ids.entry, code: 'AAAA-BBBB', password: 'whatever-pass' })).status).toBe(400);
+      // The brake in front also locks after five wrong tries (tests/throttle.test.ts); with that lifted, the code is dead on its own.
+      expect((await pub('/api/auth/reset', { userId: ids.entry, code, password: 'whatever-pass' })).status).toBe(429);
+      await ctx.db.k.deleteFrom('auth_throttle').execute();
       expect((await pub('/api/auth/reset', { userId: ids.entry, code, password: 'whatever-pass' })).status).toBe(400);
       expect((await login('amit@shop.in', 'password123')).status).toBe(200);
     });

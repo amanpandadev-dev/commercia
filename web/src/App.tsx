@@ -13,6 +13,7 @@ import { Ledger } from './pages/Ledger';
 import { Reports } from './pages/Reports';
 import { Review } from './pages/Review';
 import { Rates } from './pages/Rates';
+import { SecurityPage } from './pages/Security';
 import { UsersPage } from './pages/Users';
 import { SettingsPage } from './pages/Settings';
 import { ImportPage } from './pages/Import';
@@ -57,6 +58,7 @@ export function App() {
             <Route path="/rates" element={<Rates />} />
             <Route path="/import" element={<ImportPage />} />
             <Route path="/users" element={<UsersPage />} />
+            <Route path="/security" element={<SecurityPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
