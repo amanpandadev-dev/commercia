@@ -7,6 +7,7 @@ import { HttpError, bad, logActivity, need } from '../lib/core';
 import { hashPassword, newTotpSecret, randomToken, sha256, verifyPassword, verifyTotp } from '../lib/crypto';
 import { nowIso } from '../db/index';
 import { getSettings, setSetting } from '../lib/settings';
+import { readTotpSecret, sealTotpSecret } from '../lib/secrets';
 import { AttemptLimiter } from '../lib/rateLimit';
 import { clientIp, isHttps } from '../lib/proxy';
 import { askForReset, issueCode, pendingRequests, redeem, tellPasswordChanged } from '../lib/passwordReset';
@@ -224,7 +225,8 @@ auth.post('/totp/verify', async (c) => {
   const { code } = z.object({ code: z.string() }).parse(await c.req.json());
   const { s, user } = await partialSession(c);
   codeAttempts.check(`code:${user.id}`);
-  if (!user.totp_secret || user.totp_enabled !== 1 || !verifyTotp(user.totp_secret, code)) {
+  const secret = readTotpSecret(c.get('db').secrets, user);
+  if (!secret || user.totp_enabled !== 1 || !verifyTotp(secret, code)) {
     codeAttempts.fail(`code:${user.id}`);
     await logActivity(c.get('db').k, user.id, 'login_failed', 'user', user.id, `Wrong authenticator code for ${user.name}`);
     throw new HttpError(401, 'Wrong code', 'bad_totp');
@@ -239,7 +241,7 @@ auth.post('/totp/enroll', async (c) => {
   const { s, user } = await partialSession(c);
   if (user.totp_enabled === 1 && s.totp_ok !== 1) throw new HttpError(403, 'Enter your current code first', 'forbidden');
   const secret = newTotpSecret();
-  await c.get('db').k.updateTable('users').set({ totp_secret: secret }).where('id', '=', user.id).execute();
+  await c.get('db').k.updateTable('users').set({ totp_secret: sealTotpSecret(c.get('db').secrets, user.id, secret) }).where('id', '=', user.id).execute();
   const shop = (await getSettings(c.get('db').k)).shop_name;
   const uri = `otpauth://totp/${encodeURIComponent(`Commercia (${shop})`)}:${encodeURIComponent(user.email)}?secret=${secret}&issuer=Commercia`;
   const qr = await QRCode.toDataURL(uri, { margin: 1, width: 220 });
@@ -250,7 +252,8 @@ auth.post('/totp/confirm', async (c) => {
   const { code } = z.object({ code: z.string() }).parse(await c.req.json());
   const { s, user } = await partialSession(c);
   codeAttempts.check(`code:${user.id}`);
-  if (!user.totp_secret || !verifyTotp(user.totp_secret, code)) {
+  const pending = readTotpSecret(c.get('db').secrets, user);
+  if (!pending || !verifyTotp(pending, code)) {
     codeAttempts.fail(`code:${user.id}`);
     throw new HttpError(400, 'That code did not match', 'bad_totp');
   }
