@@ -56,6 +56,11 @@ const schema = z.object({
   /** A second, more privileged login used only to create and change tables. The app itself then runs as DATABASE_URL, which cannot. */
   DATABASE_URL_MIGRATE: z.preprocess(blank, pgUrl.optional()),
   SMTP_URL: z.preprocess(blank, z.string().regex(/^smtps?:\/\//, { error: 'must start with smtp:// or smtps://' }).optional()),
+  // The same thing in separate parts, so the password needs no URL-encoding (an address has an @ in it). SMTP_URL wins if both are set.
+  SMTP_HOST: text(),
+  SMTP_PORT: z.preprocess(blank, z.coerce.number({ error: 'must be a number' }).int().min(1).max(65535).optional()),
+  SMTP_USER: text(),
+  SMTP_PASSWORD: text(),
   MAIL_FROM: text(),
   COMMERCIA_SECRET_KEY: z.preprocess(blank, keyField.optional()),
   COMMERCIA_SECRET_KEY_PREVIOUS: z.preprocess(
@@ -92,6 +97,15 @@ export interface Config {
   scryptLog2: number;
 }
 
+/** smtps://user:password@host:465 built from the separate settings. Port 465 is encrypted from the start; others upgrade with STARTTLS and refuse to send in clear. */
+function smtpUrlFromParts(v: { SMTP_HOST?: string; SMTP_PORT?: number; SMTP_USER?: string; SMTP_PASSWORD?: string }): string | undefined {
+  if (!v.SMTP_HOST || !v.SMTP_USER || !v.SMTP_PASSWORD) return undefined;
+  const port = v.SMTP_PORT ?? 465;
+  const password = v.SMTP_PASSWORD.replace(/\s+/g, ''); // Google shows app passwords in groups of four letters
+  const login = `${encodeURIComponent(v.SMTP_USER)}:${encodeURIComponent(password)}`;
+  return port === 465 ? `smtps://${login}@${v.SMTP_HOST}:465` : `smtp://${login}@${v.SMTP_HOST}:${port}?requireTLS=true`;
+}
+
 function parse(env: NodeJS.ProcessEnv): Config {
   const r = schema.safeParse(Object.fromEntries(Object.keys(schema.shape).map((k) => [k, env[k]])));
   if (!r.success) {
@@ -105,8 +119,8 @@ function parse(env: NodeJS.ProcessEnv): Config {
     dbFile: v.COMMERCIA_DB,
     databaseUrl: v.DATABASE_URL,
     databaseUrlMigrate: v.DATABASE_URL_MIGRATE,
-    smtpUrl: v.SMTP_URL,
-    mailFrom: v.MAIL_FROM ?? 'Commercia <no-reply@localhost>',
+    smtpUrl: v.SMTP_URL ?? smtpUrlFromParts(v),
+    mailFrom: v.MAIL_FROM ?? (v.SMTP_USER?.includes('@') ? `Commercia <${v.SMTP_USER}>` : 'Commercia <no-reply@localhost>'),
     secretKey: v.COMMERCIA_SECRET_KEY,
     previousKeys: v.COMMERCIA_SECRET_KEY_PREVIOUS,
     keyFile: v.COMMERCIA_KEY_FILE,
@@ -135,6 +149,8 @@ export function secretValues(env: NodeJS.ProcessEnv = process.env): string[] {
   const out: string[] = [];
   const add = (s?: string) => s && s.length >= 6 && out.push(s);
   add(env.COMMERCIA_SECRET_KEY);
+  add(env.SMTP_PASSWORD);
+  add(env.SMTP_PASSWORD?.replace(/\s+/g, ''));
   (env.COMMERCIA_SECRET_KEY_PREVIOUS ?? '').split(',').forEach((s) => add(s.trim()));
   for (const url of [env.SMTP_URL, env.DATABASE_URL, env.DATABASE_URL_MIGRATE]) {
     if (!url) continue;

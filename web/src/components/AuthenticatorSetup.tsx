@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Mail, Copy, Printer } from 'lucide-react';
 import { api, ApiError } from '../api';
 
@@ -20,6 +20,8 @@ export function AuthenticatorSetup({ canEmail: given, onFinished, footer }: { ca
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [wait, setWait] = useState(0);
+  const autoSent = useRef(false);
 
   const begin = async () => {
     setErr('');
@@ -53,11 +55,25 @@ export function AuthenticatorSetup({ canEmail: given, onFinished, footer }: { ca
     setErr('');
     try {
       const r = await api.post('/api/auth/totp/enrol-code/email');
-      setNote(r.via === 'email' ? 'A code was emailed to the address on your account. It works for 30 minutes.' : 'Email is not set up here. Ask the Admin or an Owner for a code.');
+      setNote(r.via === 'email' ? `We emailed a code to ${r.sentTo}. It works for 30 minutes. Check Spam if it does not arrive.` : 'The email could not be sent. Ask the Admin or an Owner for a code.');
+      if (r.via === 'email') setWait(30);
     } catch (e) {
       setErr((e as Error).message);
     }
   };
+  // When email is set up, the code is sent as soon as this step opens: the person only has to read it and type it in.
+  useEffect(() => {
+    if (stage === 'code' && canEmail && !autoSent.current) {
+      autoSent.current = true;
+      emailMe();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, canEmail]);
+  useEffect(() => {
+    if (wait <= 0) return;
+    const id = setTimeout(() => setWait(wait - 1), 1000);
+    return () => clearTimeout(id);
+  }, [wait]);
   const confirm = async () => {
     setErr('');
     setBusy(true);
@@ -94,12 +110,12 @@ export function AuthenticatorSetup({ canEmail: given, onFinished, footer }: { ca
     return (
       <form className="col gap-16" onSubmit={(e) => { e.preventDefault(); submitEnrolCode(); }}>
         <h2 style={{ fontSize: 20 }}>Set up your authenticator</h2>
-        <p className="muted" style={{ margin: 0 }}>First, a one-time enrolment code, to show it is really you. Ask the Admin or an Owner to make one for you (under Users), or have one emailed to the address on your account.</p>
+        <p className="muted" style={{ margin: 0 }}>{canEmail ? 'First, check it is really you: type the code we emailed to the address on your account. Then you will set up the authenticator app.' : 'First, a one-time enrolment code, to show it is really you. Ask the Admin or an Owner to make one for you (under Users).'}</p>
         <input className="input" value={enrolCode} onChange={(e) => setEnrolCode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX" autoComplete="one-time-code" autoFocus style={{ letterSpacing: 3, fontSize: 18 }} maxLength={12} aria-label="Enrolment code" />
         {note && <div className="banner info">{note}</div>}
         {err && <div className="err">{err}</div>}
         <button className="btn primary big" disabled={busy || !enrolCode.trim()}>Continue</button>
-        {canEmail && <button type="button" className="btn ghost" onClick={emailMe}><Mail size={15} /> Email me a code</button>}
+        {canEmail && <button type="button" className="btn ghost" disabled={wait > 0} onClick={emailMe}><Mail size={15} /> {wait > 0 ? `Send again in ${wait}s` : 'Send the code again'}</button>}
         {footer}
       </form>
     );
