@@ -21,6 +21,17 @@ describe('config', () => {
     expect(config({ PORT: '', SMTP_URL: '  ', ALLOWED_IPS: '', TRUST_PROXY: '' }).port).toBe(8787);
   });
 
+  it('builds the mail address from separate settings, so the password needs no URL-encoding', () => {
+    const gmail = config({ SMTP_HOST: 'smtp.gmail.com', SMTP_USER: 'yourshop@gmail.com', SMTP_PASSWORD: 'abcd efgh ijkl mnop' });
+    expect(gmail.smtpUrl).toBe('smtps://yourshop%40gmail.com:abcdefghijklmnop@smtp.gmail.com:465'); // spaces from Google's display dropped, @ encoded
+    expect(gmail.mailFrom).toBe('Commercia <yourshop@gmail.com>');
+    const starttls = config({ SMTP_HOST: 'smtp.example.com', SMTP_PORT: '587', SMTP_USER: 'u', SMTP_PASSWORD: 'p@ss/word', MAIL_FROM: 'Shop <s@example.com>' });
+    expect(starttls.smtpUrl).toBe('smtp://u:p%40ss%2Fword@smtp.example.com:587?requireTLS=true'); // never falls back to sending in clear
+    expect(starttls.mailFrom).toBe('Shop <s@example.com>');
+    expect(config({ SMTP_HOST: 'smtp.example.com', SMTP_USER: 'u' }).smtpUrl).toBeUndefined(); // half-filled is not "set up"
+    expect(config({ SMTP_URL: 'smtps://a:b@x.example.com:465', SMTP_HOST: 'smtp.gmail.com', SMTP_USER: 'u', SMTP_PASSWORD: 'p' }).smtpUrl).toBe('smtps://a:b@x.example.com:465'); // SMTP_URL wins
+  });
+
   it('reads and checks every setting', () => {
     const c = config({
       PORT: '9000', HOST: '127.0.0.1', COMMERCIA_DB: 'x.db', DATABASE_URL: 'postgres://u:p@db.example.com/db?sslmode=require', DATABASE_URL_MIGRATE: 'postgres://m:q@db.example.com/db?sslmode=verify-full', SMTP_URL: 'smtps://u:p@smtp.example.com:465',
@@ -105,6 +116,19 @@ describe('redact', () => {
     for (const s of ['S3cretMailPw', 'Db-P%40ss-9', 'Db-P@ss-9', 'b'.repeat(64)]) expect(line).not.toContain(s);
     expect(line).toContain('smtp.example.com'); // the useful part stays
     expect(secretValues()).toEqual(expect.arrayContaining(['S3cretMailPw', 'Db-P@ss-9']));
+  });
+
+  it('hides the separate SMTP password too, with or without the spaces Google shows in it', () => {
+    const saved = process.env.SMTP_PASSWORD;
+    process.env.SMTP_PASSWORD = 'qwer tyui opas dfgh';
+    try {
+      const line = redact('login failed with qwer tyui opas dfgh / qwertyuiopasdfgh');
+      expect(line).not.toContain('qwer');
+      expect(line).not.toContain('qwertyuiopasdfgh');
+    } finally {
+      if (saved === undefined) delete process.env.SMTP_PASSWORD;
+      else process.env.SMTP_PASSWORD = saved;
+    }
   });
 
   it('hides passwords in any URL, and values next to words like password, token, code and cookie', () => {

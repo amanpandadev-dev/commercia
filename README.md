@@ -56,7 +56,7 @@ If Windows asks about the firewall, allow **Private networks** so phones on the 
 On the login page tap **Forgot password?**, choose your name, and **Get a reset code**.
 
 - **Without email** (the default at the shop): the Owner or Admin sees your request on their Dashboard and under **Users**, checks it is really you, taps **Make a reset code** and reads the 8-character code out to you. You type it with a new password. A code works once, for an hour, and allows five wrong tries.
-- **With email**: set `SMTP_URL` (for example `smtps://user:password@smtp.example.com:465`) and `MAIL_FROM` before starting, and the code is emailed to the address on the account instead (it works for 30 minutes). If sending fails, the request goes to the Owner as above.
+- **With email**: set up email once (**[docs/EMAIL.md](docs/EMAIL.md)**: four lines in `.env`, free with a Gmail App Password; check it with `npm run test-mail -- you@example.com`). The code is then emailed to the address on the account (it works for 30 minutes). If sending fails, the request goes to the Owner as above.
 - **The Admin** can't be reset by anyone else in the app. Without email, run this on the shop computer: `npm run reset-password -- ramesh@shop.in` (prints a new password; add `--reset-2fa` if the authenticator phone is lost). After too many wrong tries an account locks for up to an hour; `--unlock` (or `--unlock-all`) lifts it at once.
 
 Setting a new password signs that person out everywhere. It does not switch off their authenticator-app code. Passwords must be at least 10 characters, not a common password, and not made from the person's name, email or the shop's name.
@@ -82,6 +82,7 @@ Full detail, the threat model, key rotation and what to do if a laptop is lost o
 | Command | What it does |
 | --- | --- |
 | `npm run init-env` | Makes `.env` with a fresh random secret key (`setup.bat` does this) |
+| `npm run test-mail -- you@example.com` | Sends one test email to check the SMTP settings (docs/EMAIL.md) |
 | `npm run reset-password -- <email> [--unlock] [--reset-2fa] [--enrol-code]` / `-- --unlock-all` | Last-resort account help, on the shop computer |
 | `npm run restore-backup -- <file> [--force]` | Restore a backup, locked or plain |
 | `npm run rotate-key` | Move everything to a new secret key |
@@ -115,7 +116,7 @@ The server checks permissions on every request, not just the screens (AUTH-3, PI
 | Users, and reset codes for people who forgot their password | ✓ | ✓ (not Admins) | — |
 | Reset test data | ✓ | — | — |
 
-Owners and the Admin confirm each login with an authenticator-app code (AUTH-2). They set it up at their first login, from a QR code, after proving it is them with a code (emailed, or read out by the Admin). The Admin can switch this off in **Settings → Security**; the demo seed switches it off. Entry people do not need it (open risk in SECURITY.md). Risky actions (managing users, downloading a backup or `export.json`, wiping test data) ask for your password again.
+Owners and the Admin confirm each login with an authenticator-app code (AUTH-2). They set it up at their first login, from a QR code, after proving it is them: with email set up, a code is emailed to them automatically and they type it in first; without email, the Admin reads one out. The Admin can switch this off in **Settings → Security**; the demo seed switches it off. Entry people do not need it (open risk in SECURITY.md). Risky actions (managing users, downloading a backup or `export.json`, wiping test data) ask for your password again.
 
 ## How the numbers work
 
@@ -182,7 +183,7 @@ server/scripts/    seed-demo, move-to-postgres, reset-password, init-env, rotate
 web/src/           React screens
 scripts/windows/   firewall.bat / firewall.ps1
 tests/             vitest: GST/units/search rules, full API flows, and the security suites (throttle, two-step, secrets, backups, edge, uploads, injection...)
-docs/              REMOTE-ACCESS.md (Cloudflare Tunnel), POSTGRES.md (hosted database)
+docs/              REMOTE-ACCESS.md (Cloudflare Tunnel), EMAIL.md (sending codes), POSTGRES.md (hosted database)
 SECURITY.md        threat model, rotation, incident checklists, findings
 ```
 

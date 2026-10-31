@@ -34,3 +34,10 @@ export async function sendMail(m: Mail): Promise<void> {
   if (!cached || cached.url !== url) cached = { url, transport: nodemailer.createTransport(url) as unknown as Sender };
   await cached.transport.sendMail({ from, ...m });
 }
+
+/** ramesh@shop.in -> r***@shop.in: enough for the person to recognise their address, not enough to learn it. */
+export function maskEmail(address: string): string {
+  const [name, domain] = address.split('@');
+  if (!domain) return '***';
+  return `${name.slice(0, 1)}***@${domain}`;
+}

@@ -119,7 +119,7 @@ describe('authenticator: enrolment gate, replay, recovery codes', () => {
 
     it('can be emailed to the address on the account (proof of email control), and expires', async () => {
       const amit = as(await login('amit@shop.in'));
-      expect((await amit.post('/api/auth/totp/enrol-code/email')).body).toEqual({ via: 'email' });
+      expect((await amit.post('/api/auth/totp/enrol-code/email')).body).toEqual({ via: 'email', sentTo: 'a***@shop.in' }); // masked: enough to recognise, not to learn it
       expect(mails).toHaveLength(1);
       expect(mails[0].to).toBe('amit@shop.in');
       const code = mails[0].text.match(/\b([A-Z2-9]{4}-[A-Z2-9]{4})\b/)![1];

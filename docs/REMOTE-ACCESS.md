@@ -28,7 +28,7 @@ Staff in the shop keep using the laptop's address on the shop Wi-Fi, as before.
 ## Security measures
 
 **Already in the app** (details in `SECURITY.md`)
-- Wrong passwords, authenticator codes, recovery codes and reset codes lock the account (5, 15, 45, then 60 minutes, never longer) and the address, even for the right password later. A lock shows on the Security screen and Dashboard and is emailed if SMTP is set. Unlock on the laptop with `npm run reset-password -- <email> --unlock`.
+- Wrong passwords, authenticator codes, recovery codes and reset codes lock the account (5, 15, 45, then 60 minutes, never longer) and the address, even for the right password later. A lock shows on the Security screen and Dashboard and is emailed if email is set up (docs/EMAIL.md). Unlock on the laptop with `npm run reset-password -- <email> --unlock`.
 - The login cookie is `__Host-`prefixed, `HttpOnly`, `SameSite=Strict` and `Secure` behind the tunnel. Strict CSP, HSTS and no framing. Changes must come from the app's own address.
 - Rate limits on login, the API and uploads; request size and time limits.
 - The first-run setup screen works only on the shop laptop itself (or with a one-time console code), so a stranger reaching the URL on day one cannot claim the shop.

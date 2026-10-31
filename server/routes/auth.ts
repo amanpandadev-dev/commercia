@@ -16,7 +16,7 @@ import { config } from '../lib/config';
 import { clearSetupCode, setupAccess } from '../lib/setup';
 import { emailEnrolmentCode, issueEnrolmentCode, redeemEnrolmentCode, voidEnrolmentCodes } from '../lib/enrolment';
 import { makeRecoveryCodes, recoveryLeft, useRecoveryCode, voidRecoveryCodes } from '../lib/recovery';
-import { mailConfigured } from '../lib/mailer';
+import { mailConfigured, maskEmail } from '../lib/mailer';
 import { IDLE_MS, clearSessionCookies, createSession, readSessionToken, rotateSession } from '../lib/sessions';
 import { askForReset, issueCode, pendingRequests, redeem, tellPasswordChanged } from '../lib/passwordReset';
 import type { User } from '../db/schema';
@@ -357,7 +357,7 @@ auth.post('/totp/enrol-code/email', async (c) => {
   await refuseIfLocked(c, guard);
   for (const key of guard) await recordFailure(k, key, POLICY.reset);
   const sent = user.totp_enabled === 1 ? false : await k.transaction().execute(async (tx) => emailEnrolmentCode(tx, user, (await getSettings(tx)).shop_name));
-  return c.json({ via: sent ? 'email' : 'admin' });
+  return c.json({ via: sent ? 'email' : 'admin', ...(sent ? { sentTo: maskEmail(user.email) } : {}) });
 });
 
 /** First-time setup of an authenticator app. The new secret waits in totp_pending until its first code is confirmed. */

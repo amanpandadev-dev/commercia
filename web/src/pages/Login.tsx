@@ -211,7 +211,7 @@ function Forgot({ state, t, lang, start, onBack, onChanged }: { state: AuthState
         </form>
       ) : (
         <form onSubmit={reset} className="col gap-16">
-          {via === 'email' && <div className="banner info"><div>If this address is registered, a code has been emailed to it. It works for 30 minutes. Not arrived? Ask the Owner for one.</div></div>}
+          {via === 'email' && <div className="banner info"><div>If this account exists, we have emailed a code to its address. Type it below with a new password. It works for 30 minutes. Check Spam if it does not arrive; not there after a few minutes? Ask the Owner for one.</div></div>}
           {via === 'owner' && <div className="banner info"><div>Ask the shop Owner for a reset code. They will see your request under <b>Users</b> and on their Dashboard, and read a code out to you. If you are the Admin, run <code>npm run reset-password -- your@email</code> on the shop computer.</div></div>}
           {haveCode && !via && many && <div className="field"><label>Email</label><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>}
           {haveCode && !via && !many && (

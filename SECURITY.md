@@ -32,7 +32,7 @@ Out of scope: malware on the laptop or phones, a malicious Windows administrator
 **Two-step login** (`server/lib/enrolment.ts`, `recovery.ts`)
 - Authenticator codes cannot be replayed (the last accepted time-step is stored and refused again).
 - 10 one-time recovery codes, stored hashed, shown once.
-- The QR code is shown only after proof of control: a code emailed to the account, or a code an Admin/Owner reads out. This also holds after "Reset 2FA". Five wrong tries kill the code.
+- The QR code is shown only after proof of control: a code emailed to the account (sent automatically when email is set up, `docs/EMAIL.md`), or a code an Admin/Owner reads out. This also holds after "Reset 2FA". Five wrong tries kill the code.
 - Authenticator secrets are encrypted at rest (AES-256-GCM, bound to the user's id).
 - Owners and the Admin must use it by default (Settings → Security). **Entry people do not**; see [Open risks](#open-risks).
 
