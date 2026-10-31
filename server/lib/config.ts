@@ -29,13 +29,32 @@ const list = (what: string, ok: (s: string) => boolean) =>
     (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : []),
     z.array(z.string()).refine((a) => a.every(ok), { error: `each entry must be ${what}` }),
   );
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+/** A Postgres address. Anything that is not on this computer must say it wants an encrypted connection (sslmode=require). */
+const pgUrl = z
+  .string()
+  .regex(/^postgres(ql)?:\/\//, { error: 'must start with postgres:// or postgresql://' })
+  .refine(
+    (s) => {
+      try {
+        const u = new URL(s);
+        const mode = u.searchParams.get('sslmode');
+        return LOCAL_HOSTS.has(u.hostname) || u.hostname === '' || ['require', 'verify-ca', 'verify-full'].includes(mode ?? '');
+      } catch {
+        return true; // not a URL we can take apart: the regex above already judged it
+      }
+    },
+    { error: 'a database on another computer must use an encrypted connection: add ?sslmode=require to the address' },
+  );
 const keyField = z.string().refine((s) => parseKey(s) !== null, { error: 'must be 64 hex characters (or 32 bytes in base64)' });
 
 const schema = z.object({
   PORT: z.preprocess((v) => blank(v) ?? '8787', z.coerce.number({ error: 'must be a number' }).int().min(1).max(65535)),
   HOST: z.preprocess((v) => blank(v) ?? '0.0.0.0', z.string().min(1)),
   COMMERCIA_DB: text(),
-  DATABASE_URL: z.preprocess(blank, z.string().regex(/^postgres(ql)?:\/\//, { error: 'must start with postgres:// or postgresql://' }).optional()),
+  DATABASE_URL: z.preprocess(blank, pgUrl.optional()),
+  /** A second, more privileged login used only to create and change tables. The app itself then runs as DATABASE_URL, which cannot. */
+  DATABASE_URL_MIGRATE: z.preprocess(blank, pgUrl.optional()),
   SMTP_URL: z.preprocess(blank, z.string().regex(/^smtps?:\/\//, { error: 'must start with smtp:// or smtps://' }).optional()),
   MAIL_FROM: text(),
   COMMERCIA_SECRET_KEY: z.preprocess(blank, keyField.optional()),
@@ -57,6 +76,7 @@ export interface Config {
   host: string;
   dbFile?: string;
   databaseUrl?: string;
+  databaseUrlMigrate?: string;
   smtpUrl?: string;
   mailFrom: string;
   /** The master key for backups and authenticator secrets, if given (otherwise one is made and kept in a file). */
@@ -84,6 +104,7 @@ function parse(env: NodeJS.ProcessEnv): Config {
     host: v.HOST,
     dbFile: v.COMMERCIA_DB,
     databaseUrl: v.DATABASE_URL,
+    databaseUrlMigrate: v.DATABASE_URL_MIGRATE,
     smtpUrl: v.SMTP_URL,
     mailFrom: v.MAIL_FROM ?? 'Commercia <no-reply@localhost>',
     secretKey: v.COMMERCIA_SECRET_KEY,
@@ -115,7 +136,7 @@ export function secretValues(env: NodeJS.ProcessEnv = process.env): string[] {
   const add = (s?: string) => s && s.length >= 6 && out.push(s);
   add(env.COMMERCIA_SECRET_KEY);
   (env.COMMERCIA_SECRET_KEY_PREVIOUS ?? '').split(',').forEach((s) => add(s.trim()));
-  for (const url of [env.SMTP_URL, env.DATABASE_URL]) {
+  for (const url of [env.SMTP_URL, env.DATABASE_URL, env.DATABASE_URL_MIGRATE]) {
     if (!url) continue;
     try {
       const u = new URL(url);

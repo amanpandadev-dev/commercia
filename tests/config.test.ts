@@ -23,11 +23,12 @@ describe('config', () => {
 
   it('reads and checks every setting', () => {
     const c = config({
-      PORT: '9000', HOST: '127.0.0.1', COMMERCIA_DB: 'x.db', DATABASE_URL: 'postgres://u:p@h/db', SMTP_URL: 'smtps://u:p@smtp.example.com:465',
+      PORT: '9000', HOST: '127.0.0.1', COMMERCIA_DB: 'x.db', DATABASE_URL: 'postgres://u:p@db.example.com/db?sslmode=require', DATABASE_URL_MIGRATE: 'postgres://m:q@db.example.com/db?sslmode=verify-full', SMTP_URL: 'smtps://u:p@smtp.example.com:465',
       MAIL_FROM: 'Shop <a@b.c>', COMMERCIA_SECRET_KEY: KEY, TRUSTED_PROXIES: '10.0.0.5, 10.1.0.0/16', TRUST_PROXY: '1', ALLOWED_ORIGINS: 'https://Shop.Example.com',
       ALLOWED_IPS: '192.168.1.0/24', SHOW_USERS_ON_LAN: '1', COMMERCIA_SCRYPT_LOG2: '12',
     });
     expect(c).toMatchObject({ port: 9000, host: '127.0.0.1', dbFile: 'x.db', mailFrom: 'Shop <a@b.c>', secretKey: KEY, allowedOrigins: ['https://shop.example.com'], allowedIps: ['192.168.1.0/24'], showUsersOnLan: true, scryptLog2: 12 });
+    expect(c.databaseUrlMigrate).toContain('sslmode=verify-full');
     expect(c.trustedProxies).toEqual(['127.0.0.0/8', '::1/128', '10.0.0.5', '10.1.0.0/16']); // TRUST_PROXY=1 is a proxy on this computer
   });
 
@@ -43,6 +44,23 @@ describe('config', () => {
     const msg = (err as Error).message;
     for (const name of Object.keys(bad)) expect(msg).toContain(name);
     expect(msg).not.toMatch(/LEAKCANARY/);
+  });
+
+  it('insists on an encrypted connection to a database that is not on this computer, and never shows its password', () => {
+    for (const ok of ['postgres://u:p@localhost:5432/db', 'postgres://u:p@127.0.0.1/db', 'postgresql://u:p@[::1]/db', 'postgres://u:p@db.example.com/db?sslmode=require', 'postgres://u:p@db.example.com/db?sslmode=verify-ca']) {
+      expect(() => config({ DATABASE_URL: ok }), ok).not.toThrow();
+    }
+    for (const bad of ['postgres://u:LEAKCANARY@db.example.com/db', 'postgres://u:LEAKCANARY@db.example.com/db?sslmode=disable', 'postgres://u:LEAKCANARY@10.0.0.5/db?sslmode=prefer']) {
+      let msg = '';
+      try {
+        config({ DATABASE_URL: bad });
+      } catch (e) {
+        msg = (e as Error).message;
+      }
+      expect(msg, bad).toMatch(/DATABASE_URL: a database on another computer must use an encrypted connection/);
+      expect(msg).not.toContain('LEAKCANARY');
+    }
+    expect(() => config({ DATABASE_URL_MIGRATE: 'postgres://u:p@db.example.com/db' })).toThrow(/DATABASE_URL_MIGRATE/);
   });
 
   it('accepts a key as hex or as base64, and nothing else', () => {

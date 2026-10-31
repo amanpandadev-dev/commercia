@@ -1,0 +1,13 @@
+# Settings for the secret scan. Start from the built-in rules; allow only what is known to be a placeholder.
+title = "Commercia"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders and test values that are not secrets"
+paths = [
+  '''\.env\.example$''',
+  '''^tests/''',
+  '''^package-lock\.json$''',
+]

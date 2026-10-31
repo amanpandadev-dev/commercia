@@ -17,7 +17,9 @@
     "reset-password": "tsx server/scripts/reset-password.ts",
     "init-env": "tsx server/scripts/init-env.ts",
     "rotate-key": "tsx server/scripts/rotate-key.ts",
-    "restore-backup": "tsx server/scripts/restore-backup.ts"
+    "restore-backup": "tsx server/scripts/restore-backup.ts",
+    "pg-backup": "tsx server/scripts/pg-backup.ts",
+    "pg-restore": "tsx server/scripts/pg-restore.ts"
   },
   "engines": {
     "node": ">=20"

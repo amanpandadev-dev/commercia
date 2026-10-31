@@ -38,10 +38,17 @@ export async function openDb(opts: { file?: string; url?: string; /** For the ro
   if (url && /^postgres(ql)?:\/\//.test(url)) {
     // `pg` is only needed after go-live: npm i pg
     const pg = (await import(/* @vite-ignore */ 'pg' as string)) as { default: { Pool: new (o: object) => unknown } };
-    const k = new Kysely<DB>({
-      dialect: new PostgresDialect({ pool: new pg.default.Pool({ connectionString: url, max: 5 }) as never }),
-    });
-    await migrate(k, 'postgres');
+    const connect = (connectionString: string, max: number) =>
+      new Kysely<DB>({ dialect: new PostgresDialect({ pool: new pg.default.Pool({ connectionString, max }) as never }) });
+    // With DATABASE_URL_MIGRATE set, tables are made and changed by that login, and the app runs as one that can only read and write rows.
+    const migrateUrl = opts.url ? undefined : config().databaseUrlMigrate;
+    if (migrateUrl) {
+      const m = connect(migrateUrl, 1);
+      await migrate(m, 'postgres');
+      await m.destroy();
+    }
+    const k = connect(url, 5);
+    if (!migrateUrl) await migrate(k, 'postgres');
     return { k, dialect: 'postgres', secrets: await withSecrets(k, { postgres: true }, opts.skipSecretCheck) };
   }
 
