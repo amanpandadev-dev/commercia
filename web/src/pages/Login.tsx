@@ -169,7 +169,7 @@ function Forgot({ state, t, lang, start, onBack, onChanged }: { state: AuthState
   const reset = async (e: FormEvent) => {
     e.preventDefault();
     setErr('');
-    if (pw.length < 8) return setErr('The password must be at least 8 characters');
+    if (pw.length < 10) return setErr('The password must be at least 10 characters');
     if (pw !== pw2) return setErr('The two passwords are not the same');
     setBusy(true);
     try {
@@ -229,7 +229,7 @@ function Forgot({ state, t, lang, start, onBack, onChanged }: { state: AuthState
             <label>{t('Reset code')}</label>
             <input className="input" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX" autoComplete="one-time-code" autoFocus style={{ letterSpacing: 3, fontSize: 18 }} maxLength={12} />
           </div>
-          <div className="field"><label>{t('New password')} (8+ characters)</label><input className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" /></div>
+          <div className="field"><label>{t('New password')} (10+ characters)</label><input className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" /></div>
           <div className="field"><label>{t('Type it again')}</label><input className="input" type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" /></div>
           {err && <div className="err">{err}</div>}
           <button className="btn primary big" disabled={busy || !code.trim() || !pw || (haveCode && !via && (many ? !email.trim() : !userId))}>{t('Set new password')}</button>
@@ -313,7 +313,7 @@ function Setup({ t, onDone, codeRequired }: { t: (s: string) => string; onDone: 
       <div className="field"><label>Shop name</label><input className="input" value={f.shopName} onChange={set('shopName')} autoFocus placeholder="Sharma Kirana Store" /></div>
       <div className="field"><label>Your name</label><input className="input" value={f.name} onChange={set('name')} /></div>
       <div className="field"><label>Email</label><input className="input" type="email" value={f.email} onChange={set('email')} autoComplete="username" /></div>
-      <div className="field"><label>{t('Password')} (8+ characters)</label><input className="input" type="password" value={f.password} onChange={set('password')} autoComplete="new-password" /></div>
+      <div className="field"><label>{t('Password')} (10+ characters)</label><input className="input" type="password" value={f.password} onChange={set('password')} autoComplete="new-password" /></div>
       {codeRequired && (
         <div className="field">
           <label>Setup code</label>
@@ -322,7 +322,7 @@ function Setup({ t, onDone, codeRequired }: { t: (s: string) => string; onDone: 
         </div>
       )}
       {err && <div className="err">{err}</div>}
-      <button className="btn primary big" disabled={!f.shopName || !f.name || !f.email || f.password.length < 8 || (codeRequired && !f.setupCode.trim())}>Create shop</button>
+      <button className="btn primary big" disabled={!f.shopName || !f.name || !f.email || f.password.length < 10 || (codeRequired && !f.setupCode.trim())}>Create shop</button>
     </form>
   );
 }

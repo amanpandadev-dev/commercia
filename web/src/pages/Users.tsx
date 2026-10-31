@@ -242,7 +242,7 @@ function UserForm({ user, onClose, onDone }: { user: U | null; onClose: () => vo
       <Field label="Role">
         <Seg value={f.role} onChange={(r) => setF({ ...f, role: r })} options={roles.map((r) => ({ value: r, label: ROLE_LABEL[r].en }))} />
       </Field>
-      <Field label={user ? 'New password (leave empty to keep)' : 'Password (8+ characters)'} hint={user ? 'Setting a password signs them out everywhere' : undefined}>
+      <Field label={user ? 'New password (leave empty to keep)' : 'Password (10+ characters)'} hint={user ? 'Setting a password signs them out everywhere' : undefined}>
         <input className="input" type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
       </Field>
       {user && (

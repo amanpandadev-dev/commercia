@@ -18,6 +18,7 @@ import { UsersPage } from './pages/Users';
 import { SettingsPage } from './pages/Settings';
 import { ImportPage } from './pages/Import';
 import { Losses } from './pages/Losses';
+import { PasswordPrompt } from './components/PasswordPrompt';
 
 export function App() {
   const [auth, setAuth] = useState<AuthState | null>(null);
@@ -40,6 +41,7 @@ export function App() {
   return (
     <BrowserRouter>
       <AppProvider me={auth.me as Me} onLogout={load}>
+        <PasswordPrompt />
         <Layout shopName={auth.shop.name}>
           <Routes>
             <Route path="/" element={<Dashboard />} />

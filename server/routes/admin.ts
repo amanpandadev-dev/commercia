@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppEnv } from '../lib/core';
-import { HttpError, bad, logActivity, need } from '../lib/core';
+import { HttpError, bad, logActivity, need, requireReauth } from '../lib/core';
 import { EXAMPLES, FIELDS, commitImport, mapHeaders, previewImport, undoImport, type ImportKind, type RowData } from '../lib/importer';
 import { readSheet, toCsv } from '../lib/sheets';
 import { customPackTypes, getSettings, setSetting, type SchemePeriod } from '../lib/settings';
@@ -341,6 +341,7 @@ admin.post('/backup/now', async (c) => {
 /** Download a copy of the database, e.g. to a USB drive. It is locked with the secret key like every backup. */
 admin.get('/backup/download', async (c) => {
   const user = await need(c, 'backup.run');
+  await requireReauth(c);
   const db = c.get('db');
   const res = await runBackup(db);
   const data = fs.readFileSync(res.file);
@@ -363,6 +364,7 @@ const NEVER_EXPORTED: Partial<Record<keyof DB, string[]>> = { users: ['password_
 
 admin.get('/admin/export.json', async (c) => {
   const user = await need(c, 'backup.run');
+  await requireReauth(c);
   const { k } = c.get('db');
   const out: Record<string, unknown[]> = {};
   let rows = 0;
@@ -380,6 +382,7 @@ admin.get('/admin/export.json', async (c) => {
 /** Wipe test data before go-live; users and settings stay (PILOT-7). Admin only, after typing the shop name. */
 admin.post('/admin/reset', async (c) => {
   const user = await need(c, 'data.reset');
+  await requireReauth(c);
   const { confirm } = z.object({ confirm: z.string() }).parse(await c.req.json());
   const db = c.get('db');
   const s = await getSettings(db.k);

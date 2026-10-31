@@ -14,10 +14,19 @@ describe('authenticator: enrolment gate, replay, recovery codes', () => {
   const call = (method: string, url: string, body?: unknown, cookie = '') =>
     ctx.app.request(url, { method, headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const json = async (r: Response) => ({ status: r.status, headers: r.headers, body: (await r.json().catch(() => null)) as any });
+  /** Like the app's screen: when a risky action asks for the password again, type it and go on. */
+  const send = async (method: string, url: string, body: unknown, cookie: string) => {
+    const r = await json(await call(method, url, body, cookie));
+    if (r.status === 403 && r.body?.code === 'reauth_required') {
+      await call('POST', '/api/account/reauth', { password: 'password123' }, cookie);
+      return json(await call(method, url, body, cookie));
+    }
+    return r;
+  };
   const as = (cookie: string) => ({
-    post: async (url: string, body: unknown = {}) => json(await call('POST', url, body, cookie)),
-    get: async (url: string) => json(await call('GET', url, undefined, cookie)),
-    patch: async (url: string, body: unknown = {}) => json(await call('PATCH', url, body, cookie)),
+    post: (url: string, body: unknown = {}) => send('POST', url, body, cookie),
+    get: (url: string) => send('GET', url, undefined, cookie),
+    patch: (url: string, body: unknown = {}) => send('PATCH', url, body, cookie),
   });
   /** Password login: the cookie of a session that still needs an authenticator step. */
   const login = async (email: string, password = 'password123') => {

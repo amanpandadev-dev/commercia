@@ -162,8 +162,11 @@ describe('exports and downloads through the app', () => {
     expect((await owner.get('/api/activity')).some((a: any) => a.action === 'backup_download' && /Sunil Sharma downloaded a backup/.test(a.summary))).toBe(true);
   });
 
+  /** A logged-in session that has typed its password again (the export and the download ask for that). */
   async function cookie() {
     const login = await ctx.app.request('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'sunil@shop.in', password: 'password123' }) });
-    return (login.headers.get('set-cookie') ?? '').split(';')[0];
+    const c = (login.headers.get('set-cookie') ?? '').split(';')[0];
+    await ctx.app.request('/api/account/reauth', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: c }, body: JSON.stringify({ password: 'password123' }) });
+    return c;
   }
 });

@@ -11,6 +11,7 @@ import '../lib/boot';
 import crypto from 'node:crypto';
 import { openDb, nowIso } from '../db/index';
 import { hashPassword } from '../lib/crypto';
+import { checkPassword } from '../lib/passwordPolicy';
 import { logActivity } from '../lib/core';
 import { unlockEverything, unlockUser } from '../lib/throttle';
 import { issueEnrolmentCode } from '../lib/enrolment';
@@ -30,9 +31,12 @@ if (!email) {
   console.error('Usage: npm run reset-password -- <email> [new password] [--reset-2fa]\n       npm run reset-password -- <email> --unlock\n       npm run reset-password -- --unlock-all');
   process.exit(1);
 }
-if (given && given.length < 8) {
-  console.error('The password must be at least 8 characters.');
-  process.exit(1);
+if (given) {
+  const problem = checkPassword(given);
+  if (problem) {
+    console.error(problem);
+    process.exit(1);
+  }
 }
 
 const db = await openDb();

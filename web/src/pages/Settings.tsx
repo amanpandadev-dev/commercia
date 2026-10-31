@@ -134,7 +134,7 @@ export function SettingsPage() {
           <div className="row wrap" style={{ alignItems: 'flex-end' }}>
             <Field label="Current password"><input className="input" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Field>
             <Field label="New password"><input className="input" type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></Field>
-            <button className="btn" disabled={!pw.current || pw.next.length < 8} onClick={async () => { try { await api.post('/api/account/password', pw); setPw({ current: '', next: '' }); toast('Password changed'); } catch (e) { toast((e as Error).message, 'error'); } }}>{t('Change password')}</button>
+            <button className="btn" disabled={!pw.current || pw.next.length < 10} onClick={async () => { try { await api.post('/api/account/password', pw); setPw({ current: '', next: '' }); toast('Password changed'); } catch (e) { toast((e as Error).message, 'error'); } }}>{t('Change password')}</button>
           </div>
           <div><button className="btn" onClick={async () => { await api.post('/api/account/logout-all'); window.location.reload(); }}>{t('Sign out of all devices')}</button></div>
         </div>

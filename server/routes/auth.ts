@@ -3,8 +3,9 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import type { AppEnv } from '../lib/core';
-import { HttpError, bad, logActivity, need } from '../lib/core';
-import { hashPassword, newTotpSecret, randomToken, sha256, verifyPassword, verifyTotpStep } from '../lib/crypto';
+import { HttpError, REAUTH_MINUTES, bad, logActivity, need, requireReauth } from '../lib/core';
+import { hashPassword, hashPasswordAsync, newTotpSecret, passwordNeedsRehash, randomToken, sha256, verifyPassword, verifyPasswordAsync, verifyTotpStep } from '../lib/crypto';
+import { MAX_LENGTH, MIN_LENGTH, checkPassword, type Who } from '../lib/passwordPolicy';
 import { nowIso } from '../db/index';
 import { getSettings, setSetting } from '../lib/settings';
 import { readTotpSecret, sealTotpSecret } from '../lib/secrets';
@@ -108,7 +109,7 @@ async function refuseIfLocked(c: Ctx, keys: string[], password?: string) {
   try {
     for (const key of keys) await checkThrottle(k, key);
   } catch (e) {
-    if (password !== undefined) verifyPassword(password, (dummyHash ||= hashPassword('x')));
+    if (password !== undefined) await verifyPasswordAsync(password, (dummyHash ||= hashPassword('x')));
     throw e;
   }
 }
@@ -125,7 +126,13 @@ async function countFailure(c: Ctx, tries: { key: string; policy: Policy; what: 
   }
 }
 
-const passwordSchema = z.string().min(8, 'Password must be at least 8 characters');
+const passwordSchema = z.string().min(MIN_LENGTH, `Password must be at least ${MIN_LENGTH} characters`).max(MAX_LENGTH, `Password can be at most ${MAX_LENGTH} characters`);
+
+/** Refuses a password that is too short, too common, or built from the person's own details. */
+async function assertPassword(k: Tx, password: string, who: Who) {
+  const msg = checkPassword(password, { ...who, shopName: who.shopName ?? (await getSettings(k)).shop_name });
+  if (msg) throw new HttpError(400, msg, 'weak_password');
+}
 
 export const auth = new Hono<AppEnv>();
 
@@ -171,6 +178,8 @@ auth.post('/setup', async (c) => {
     await raiseAlert(k, { action: 'setup_refused', summary: `First-time setup was refused from ${clientIp(c)}: it must be done on the shop computer, or with the setup code shown there`, email: false });
     throw new HttpError(403, 'Set-up can only be done on the shop computer, or with the setup code shown in its window.', 'setup_forbidden');
   }
+  await assertPassword(k, body.password, { name: body.name, email: body.email, shopName: body.shopName });
+  const passwordHash = await hashPasswordAsync(body.password);
   const user = await k.transaction().execute(async (tx) => {
     // Claiming the flag is atomic: of two set-ups at once, one wins.
     try {
@@ -184,7 +193,7 @@ auth.post('/setup', async (c) => {
       .values({
         name: body.name,
         email: body.email.toLowerCase(),
-        password_hash: hashPassword(body.password),
+        password_hash: passwordHash,
         role: 'admin',
         active: 1,
         lang: 'en',
@@ -219,7 +228,7 @@ auth.post('/login', async (c) => {
   const from = addressKey(clientIp(c));
   await refuseIfLocked(c, [who, from], body.password);
   // Same work whether or not the user exists, so timing doesn't reveal accounts.
-  const ok = user ? verifyPassword(body.password, user.password_hash) : (verifyPassword(body.password, (dummyHash ||= hashPassword('x'))), false);
+  const ok = user ? await verifyPasswordAsync(body.password, user.password_hash) : (await verifyPasswordAsync(body.password, (dummyHash ||= hashPassword('x'))), false);
   if (!user || !ok) {
     await logActivity(k, user?.id ?? null, 'login_failed', 'user', user?.id ?? null, `Wrong password for ${user?.name ?? body.email ?? '?'} (from ${clientIp(c)})`);
     await countFailure(c, [
@@ -229,6 +238,8 @@ auth.post('/login', async (c) => {
     throw new HttpError(401, 'Wrong password', 'bad_credentials');
   }
   await clearThrottle(k, who);
+  // An older or cheaper hash is replaced now, while the password is in hand.
+  if (passwordNeedsRehash(user.password_hash)) await k.updateTable('users').set({ password_hash: await hashPasswordAsync(body.password) }).where('id', '=', user.id).execute();
   await startSession(c, user);
   await logActivity(k, user.id, 'login', 'user', user.id, `${user.name} logged in`);
   const s = await getSettings(k);
@@ -267,6 +278,7 @@ auth.post('/reset', async (c) => {
   const user = await findPerson(c, body);
   const guard = [`reset:${user ? `u${user.id}` : `e${(body.email ?? '').trim().toLowerCase().slice(0, 120)}`}`, addressKey(clientIp(c))];
   await refuseIfLocked(c, guard);
+  if (user) await assertPassword(k, body.password, { name: user.name, email: user.email });
   const ok = user ? await k.transaction().execute((tx) => redeem(tx, user, body.code, body.password)) : false;
   if (!user || !ok) {
     await countFailure(c, [
@@ -432,11 +444,35 @@ account.post('/logout-all', async (c) => {
 account.post('/password', async (c) => {
   const body = z.object({ current: z.string(), next: passwordSchema }).parse(await c.req.json());
   const user = c.get('user');
-  if (!verifyPassword(body.current, user.password_hash)) throw new HttpError(400, 'Current password is wrong', 'bad_credentials');
   const { k } = c.get('db');
-  await k.updateTable('users').set({ password_hash: hashPassword(body.next) }).where('id', '=', user.id).execute();
+  const keys = [accountKey(user), addressKey(clientIp(c))];
+  await refuseIfLocked(c, keys, body.current);
+  if (!(await verifyPasswordAsync(body.current, user.password_hash))) {
+    await countFailure(c, [{ key: keys[0], policy: POLICY.account, what: `${user.name}'s account` }, { key: keys[1], policy: POLICY.address, what: `The address ${clientIp(c)}` }]);
+    throw new HttpError(400, 'Current password is wrong', 'bad_credentials');
+  }
+  await assertPassword(k, body.next, { name: user.name, email: user.email });
+  await k.updateTable('users').set({ password_hash: await hashPasswordAsync(body.next) }).where('id', '=', user.id).execute();
   await logActivity(k, user.id, 'update', 'user', user.id, `${user.name} changed their password`);
   return c.json({ ok: true });
+});
+
+/** Typing the password again before something risky (managing people, exporting, downloading a backup, wiping). Counts for a few minutes. */
+account.post('/reauth', async (c) => {
+  const { password } = z.object({ password: z.string() }).parse(await c.req.json());
+  const user = c.get('user');
+  const { k } = c.get('db');
+  const keys = [accountKey(user), addressKey(clientIp(c))];
+  await refuseIfLocked(c, keys, password);
+  if (!(await verifyPasswordAsync(password, user.password_hash))) {
+    await raiseAlert(k, { action: 'reauth_failed', userId: user.id, summary: `Wrong password when ${user.name} confirmed a sensitive action (from ${clientIp(c)})` });
+    await countFailure(c, [{ key: keys[0], policy: POLICY.account, what: `${user.name}'s account` }, { key: keys[1], policy: POLICY.address, what: `The address ${clientIp(c)}` }]);
+    throw new HttpError(400, 'Wrong password', 'bad_credentials'); // 400, not 401: the session itself is fine
+  }
+  await clearThrottle(k, keys[0]);
+  const until = new Date(Date.now() + REAUTH_MINUTES * 60_000).toISOString();
+  await k.updateTable('sessions').set({ reauth_until: until }).where('id', '=', c.get('sessionId')).execute();
+  return c.json({ ok: true, until });
 });
 
 /** What the person can see about their own sign-in security. */
@@ -453,7 +489,7 @@ account.post('/recovery-codes', async (c) => {
   if (user.totp_enabled !== 1) throw bad('Set up an authenticator first');
   const keys = [accountKey(user), addressKey(clientIp(c))];
   await refuseIfLocked(c, keys, password);
-  if (!verifyPassword(password, user.password_hash)) {
+  if (!(await verifyPasswordAsync(password, user.password_hash))) {
     await countFailure(c, [{ key: keys[0], policy: POLICY.account, what: `${user.name}'s account` }, { key: keys[1], policy: POLICY.address, what: `The address ${clientIp(c)}` }]);
     throw new HttpError(400, 'Wrong password', 'bad_credentials');
   }
@@ -503,11 +539,13 @@ function guardAdmin(actor: User, targetRole: Role | undefined) {
 
 users.post('/', async (c) => {
   const actor = await need(c, 'users.manage');
+  await requireReauth(c);
   const body = z
     .object({ name: z.string().min(1), email: z.string().email(), role: roleSchema, password: passwordSchema })
     .parse(await c.req.json());
   guardAdmin(actor, body.role);
   const { k } = c.get('db');
+  await assertPassword(k, body.password, { name: body.name, email: body.email });
   const exists = await k.selectFrom('users').select('id').where('email', '=', body.email.toLowerCase()).executeTakeFirst();
   if (exists) throw new HttpError(409, 'Someone already uses this email', 'conflict');
   const u = await k
@@ -516,7 +554,7 @@ users.post('/', async (c) => {
       name: body.name,
       email: body.email.toLowerCase(),
       role: body.role,
-      password_hash: hashPassword(body.password),
+      password_hash: await hashPasswordAsync(body.password),
       active: 1,
       lang: 'en',
       totp_enabled: 0,
@@ -533,6 +571,7 @@ users.post('/', async (c) => {
 /** A one-time code to read out to someone who forgot their password. Shown once, works for an hour. */
 users.post('/:id/reset-code', async (c) => {
   const actor = await need(c, 'users.manage');
+  await requireReauth(c);
   const { k } = c.get('db');
   const target = await k.selectFrom('users').selectAll().where('id', '=', Number(c.req.param('id'))).executeTakeFirst();
   if (!target) throw new HttpError(404, 'User not found', 'not_found');
@@ -545,6 +584,7 @@ users.post('/:id/reset-code', async (c) => {
 /** A one-time code that lets someone set up their authenticator. Shown once, works for a day. */
 users.post('/:id/enrolment-code', async (c) => {
   const actor = await need(c, 'users.manage');
+  await requireReauth(c);
   const { k } = c.get('db');
   const target = await k.selectFrom('users').selectAll().where('id', '=', Number(c.req.param('id'))).executeTakeFirst();
   if (!target) throw new HttpError(404, 'User not found', 'not_found');
@@ -556,6 +596,7 @@ users.post('/:id/enrolment-code', async (c) => {
 
 users.patch('/:id', async (c) => {
   const actor = await need(c, 'users.manage');
+  await requireReauth(c);
   const id = Number(c.req.param('id'));
   const body = z
     .object({
@@ -587,7 +628,8 @@ users.patch('/:id', async (c) => {
     notes.push(body.active ? 'reactivated' : 'deactivated');
   }
   if (body.password) {
-    patch.password_hash = hashPassword(body.password);
+    await assertPassword(k, body.password, { name: target.name, email: target.email });
+    patch.password_hash = await hashPasswordAsync(body.password);
     notes.push('password reset');
   }
   if (body.resetTotp) {

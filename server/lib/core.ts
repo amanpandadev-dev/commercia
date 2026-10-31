@@ -99,3 +99,14 @@ export async function nextCounter(tx: Tx, name: string): Promise<number> {
 }
 
 export const toNum = (v: unknown): number => (v == null ? 0 : Number(v));
+
+export const REAUTH_MINUTES = 5;
+
+/**
+ * For actions that put a lot at risk (managing people, exporting everything, downloading a backup, wiping test data): the
+ * person must have typed their password again in the last few minutes, so a left-open screen or a stolen session is not enough.
+ */
+export async function requireReauth(c: Ctx): Promise<void> {
+  const row = await c.get('db').k.selectFrom('sessions').select('reauth_until').where('id', '=', c.get('sessionId')).executeTakeFirst();
+  if (!row?.reauth_until || Date.parse(row.reauth_until) < Date.now()) throw new HttpError(403, 'Type your password to continue.', 'reauth_required');
+}

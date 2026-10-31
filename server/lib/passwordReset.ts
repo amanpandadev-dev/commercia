@@ -10,7 +10,7 @@
 import crypto from 'node:crypto';
 import type { Tx } from './core';
 import { logActivity } from './core';
-import { hashPassword, sha256 } from './crypto';
+import { hashPasswordAsync, sha256 } from './crypto';
 import { mailConfigured, sendMail } from './mailer';
 import type { User } from '../db/schema';
 
@@ -127,7 +127,7 @@ export async function redeem(tx: Tx, user: User, rawCode: string, newPassword: s
     await logActivity(tx, user.id, 'login_failed', 'password_reset', user.id, `Wrong password reset code for ${user.name}`);
     return false;
   }
-  await tx.updateTable('users').set({ password_hash: hashPassword(newPassword), session_epoch: user.session_epoch + 1 }).where('id', '=', user.id).execute();
+  await tx.updateTable('users').set({ password_hash: await hashPasswordAsync(newPassword), session_epoch: user.session_epoch + 1 }).where('id', '=', user.id).execute();
   await tx.updateTable('password_resets').set({ used_at: now }).where('id', '=', row.id).execute();
   await tx.updateTable('password_resets').set({ dismissed: 1 }).where('user_id', '=', user.id).where('used_at', 'is', null).execute();
   await logActivity(tx, user.id, 'update', 'user', user.id, `${user.name} chose a new password with a reset code`);

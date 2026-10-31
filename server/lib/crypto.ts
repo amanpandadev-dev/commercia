@@ -1,18 +1,67 @@
 import crypto from 'node:crypto';
+import { config } from './config';
 
-// Passwords: scrypt with a random salt.
+// Passwords: scrypt with a random salt. The cost is written into the hash itself ("scrypt$N$r$p$salt$hash"), so it can be
+// raised later without breaking anyone: the next successful login quietly re-hashes with the current cost. Hashes from before
+// ("scrypt$salt$hash") were N=16384, r=8, p=1 and are still read.
+const R = 8;
+const P = 1;
+const LEGACY_N = 16384;
+const KEY_LEN = 32;
+const maxmem = (n: number, r: number) => 129 * n * r + 4 * 1024 * 1024;
+
+const costN = () => 2 ** config().scryptLog2;
+
+interface Parsed {
+  n: number;
+  r: number;
+  p: number;
+  salt: Buffer;
+  hash: Buffer;
+}
+function parse(stored: string): Parsed | null {
+  const parts = stored.split('$');
+  if (parts[0] !== 'scrypt') return null;
+  if (parts.length === 3 && parts[1] && parts[2]) return { n: LEGACY_N, r: R, p: P, salt: Buffer.from(parts[1], 'base64'), hash: Buffer.from(parts[2], 'base64') };
+  if (parts.length === 6) {
+    const [n, r, p] = parts.slice(1, 4).map(Number);
+    if (![n, r, p].every((x) => Number.isInteger(x) && x > 0) || n > 2 ** 22 || r > 32 || p > 8) return null; // a stored value cannot make us use a huge amount of memory
+    return { n, r, p, salt: Buffer.from(parts[4], 'base64'), hash: Buffer.from(parts[5], 'base64') };
+  }
+  return null;
+}
+const format = (n: number, salt: Buffer, hash: Buffer) => `scrypt$${n}$${R}$${P}$${salt.toString('base64')}$${hash.toString('base64')}`;
+const derive = (pw: string, salt: Buffer, n: number, r: number, p: number) => crypto.scryptSync(pw, salt, KEY_LEN, { N: n, r, p, maxmem: maxmem(n, r) });
+const deriveAsync = (pw: string, salt: Buffer, n: number, r: number, p: number) =>
+  new Promise<Buffer>((resolve, reject) => crypto.scrypt(pw, salt, KEY_LEN, { N: n, r, p, maxmem: maxmem(n, r) }, (e, k) => (e ? reject(e) : resolve(k))));
+
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16);
-  const hash = crypto.scryptSync(password, salt, 32, { N: 16384, r: 8, p: 1 });
-  return `scrypt$${salt.toString('base64')}$${hash.toString('base64')}`;
+  const n = costN();
+  return format(n, salt, derive(password, salt, n, R, P));
+}
+/** The same, without holding up the server while it works (it takes a few tenths of a second at the current cost). */
+export async function hashPasswordAsync(password: string): Promise<string> {
+  const salt = crypto.randomBytes(16);
+  const n = costN();
+  return format(n, salt, await deriveAsync(password, salt, n, R, P));
 }
 
 export function verifyPassword(password: string, stored: string): boolean {
-  const [scheme, saltB64, hashB64] = stored.split('$');
-  if (scheme !== 'scrypt' || !saltB64 || !hashB64) return false;
-  const expected = Buffer.from(hashB64, 'base64');
-  const actual = crypto.scryptSync(password, Buffer.from(saltB64, 'base64'), expected.length, { N: 16384, r: 8, p: 1 });
-  return crypto.timingSafeEqual(expected, actual);
+  const x = parse(stored);
+  if (!x || x.hash.length !== KEY_LEN) return false;
+  return crypto.timingSafeEqual(x.hash, derive(password, x.salt, x.n, x.r, x.p));
+}
+export async function verifyPasswordAsync(password: string, stored: string): Promise<boolean> {
+  const x = parse(stored);
+  if (!x || x.hash.length !== KEY_LEN) return false;
+  return crypto.timingSafeEqual(x.hash, await deriveAsync(password, x.salt, x.n, x.r, x.p));
+}
+
+/** The hash was made with a lower cost (or the old format) than the one in force now. */
+export function passwordNeedsRehash(stored: string): boolean {
+  const x = parse(stored);
+  return !!x && (x.n < costN() || x.r !== R || x.p !== P || stored.split('$').length === 3);
 }
 
 export const randomToken = () => crypto.randomBytes(32).toString('base64url');

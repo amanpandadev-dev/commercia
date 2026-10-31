@@ -46,9 +46,9 @@ export async function setup() {
   await mk('Sunil Sharma', 'sunil@shop.in', 'owner');
   await mk('Amit Kumar', 'amit@shop.in', 'entry');
 
-  const client = async (email: string): Promise<Client> => {
+  const client = async (email: string, password = 'password123'): Promise<Client> => {
     let cookie = '';
-    const req = async (method: string, url: string, body?: unknown) => {
+    const send = async (method: string, url: string, body?: unknown) => {
       const res = await app.request(url, {
         method,
         headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
@@ -65,12 +65,21 @@ export async function setup() {
       }
       return { status: res.status, json };
     };
+    // Like the app's screen: when a risky action asks for the password again, type it and go on.
+    const req = async (method: string, url: string, body?: unknown) => {
+      const r = await send(method, url, body);
+      if (r.status === 403 && r.json?.code === 'reauth_required') {
+        await send('POST', '/api/account/reauth', { password });
+        return send(method, url, body);
+      }
+      return r;
+    };
     const ok = async (method: string, url: string, body?: unknown) => {
       const r = await req(method, url, body);
       if (r.status >= 400) throw new Error(`${method} ${url} → ${r.status}: ${JSON.stringify(r.json)}`);
       return r.json;
     };
-    const login = await req('POST', '/api/auth/login', { email, password: 'password123' });
+    const login = await req('POST', '/api/auth/login', { email, password });
     if (login.status !== 200) throw new Error(`login failed ${JSON.stringify(login.json)}`);
     return { req, get: (u) => ok('GET', u), post: (u, b) => ok('POST', u, b ?? {}), patch: (u, b) => ok('PATCH', u, b ?? {}) };
   };
