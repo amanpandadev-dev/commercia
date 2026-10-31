@@ -91,8 +91,9 @@ interface AppState {
   me: Me;
   lang: Lang;
   setLang: (l: Lang) => void;
-  theme: 'light' | 'dark';
-  setTheme: (t: 'light' | 'dark') => void;
+  /** The person's choice; 'system' follows the phone or PC setting. */
+  theme: ThemePref;
+  setTheme: (t: ThemePref) => void;
   t: (en: string) => string;
   sub: (en: string) => string;
   can: (p: Permission) => boolean;
@@ -132,13 +133,29 @@ const store = {
   },
 };
 
-export function getStoredTheme(): 'light' | 'dark' {
+export type ThemePref = 'system' | 'light' | 'dark';
+const darkQuery = () => window.matchMedia?.('(prefers-color-scheme: dark)');
+export function getStoredTheme(): ThemePref {
   const s = store.get('commercia.theme');
-  if (s === 'light' || s === 'dark') return s;
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return s === 'light' || s === 'dark' ? s : 'system';
 }
-export function applyTheme(t: 'light' | 'dark') {
-  document.documentElement.dataset.theme = t;
+let following: ((e: MediaQueryListEvent) => void) | null = null;
+/** Sets light or dark on the page; with 'system' it also follows the device when that changes (e.g. at sunset). */
+export function applyTheme(t: ThemePref) {
+  const q = darkQuery();
+  const set = (dark: boolean) => {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#000000' : '#f2f2f7');
+  };
+  if (following && q) q.removeEventListener('change', following);
+  following = null;
+  if (t === 'system') {
+    set(!!q?.matches);
+    if (q) {
+      following = (e) => set(e.matches);
+      q.addEventListener('change', following);
+    }
+  } else set(t === 'dark');
 }
 export const storedLang = (): Lang | null => {
   const s = store.get('commercia.lang');
@@ -165,7 +182,7 @@ export function productSearchIndex(products: CProduct[]) {
 export function AppProvider({ me: initialMe, onLogout, children }: { me: Me; onLogout: () => void; children: ReactNode }) {
   const [me] = useState(initialMe);
   const [lang, setLangState] = useState<Lang>(storedLang() ?? initialMe.lang ?? 'en');
-  const [theme, setThemeState] = useState<'light' | 'dark'>(getStoredTheme());
+  const [theme, setThemeState] = useState<ThemePref>(getStoredTheme());
   const [settings, setSettings] = useState<Settings | null>(null);
   const [products, setProducts] = useState<CProduct[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -179,7 +196,7 @@ export function AppProvider({ me: initialMe, onLogout, children }: { me: Me; onL
     document.documentElement.lang = l;
     api.post('/api/account/lang', { lang: l }).catch(() => {});
   }, []);
-  const setTheme = useCallback((t: 'light' | 'dark') => {
+  const setTheme = useCallback((t: ThemePref) => {
     setThemeState(t);
     store.set('commercia.theme', t);
     applyTheme(t);
