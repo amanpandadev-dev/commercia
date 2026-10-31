@@ -3,7 +3,8 @@ import { sql } from 'kysely';
 import { z } from 'zod';
 import ExcelJS from 'exceljs';
 import type { AppEnv, Tx } from '../lib/core';
-import { bad, need, toNum } from '../lib/core';
+import { bad, logActivity, need, toNum } from '../lib/core';
+import { neutralizeFormula } from '../lib/sheets';
 import { categoryPaths, customerBalances, lastPurchasePerBase, loadCatalog, stockMap } from '../lib/catalog';
 import { addDays, istDate, isIsoDate } from '../../shared/dates';
 import { roundHalfUp } from '../../shared/money';
@@ -603,12 +604,13 @@ const exportSchema = z.object({
 
 reports.post('/export', async (c) => {
   const body = exportSchema.parse(await c.req.json());
+  const user = c.get('user');
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Commercia';
   for (const s of body.sheets) {
     const ws = wb.addWorksheet(s.name.replace(/[\\/?*[\]:]/g, ' '));
     ws.columns = s.columns.map((col) => ({
-      header: col.header,
+      header: neutralizeFormula(col.header),
       key: col.key,
       width: Math.max(12, Math.min(40, col.header.length + 4)),
       style: col.type === 'money' ? { numFmt: '"₹"#,##,##0.00' } : {},
@@ -618,12 +620,14 @@ reports.post('/export', async (c) => {
       const row: Record<string, unknown> = {};
       for (const col of s.columns) {
         const v = r[col.key];
-        row[col.key] = col.type === 'money' ? toNum(v) / 100 : col.type === 'number' ? toNum(v) : (v ?? '');
+        row[col.key] = col.type === 'money' ? toNum(v) / 100 : col.type === 'number' ? toNum(v) : neutralizeFormula(v ?? '');
       }
       ws.addRow(row);
     }
   }
   const buf = await wb.xlsx.writeBuffer();
+  const rowCount = body.sheets.reduce((a, s) => a + s.rows.length, 0);
+  await logActivity(c.get('db').k, user.id, 'export', 'report', null, `${user.name} exported "${body.fileName.slice(0, 80)}" (${rowCount} rows in ${body.sheets.length} sheet${body.sheets.length === 1 ? '' : 's'})`);
   const name = body.fileName.replace(/[^\w.\- ]+/g, '_').replace(/\.xlsx$/i, '') + '.xlsx';
   return new Response(buf as ArrayBuffer, {
     headers: {
