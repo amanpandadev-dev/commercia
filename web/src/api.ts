@@ -23,7 +23,7 @@ export const onPasswordNeeded = (fn: typeof askPassword) => {
   };
 };
 
-async function withPassword<T>(run: () => Promise<T>): Promise<T> {
+async function retryAfterReauth<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (e) {
@@ -71,7 +71,7 @@ async function rawRequest<T>(method: string, url: string, body?: unknown): Promi
   return data as T;
 }
 
-const request = <T>(method: string, url: string, body?: unknown) => withPassword(() => rawRequest<T>(method, url, body));
+const request = <T>(method: string, url: string, body?: unknown) => retryAfterReauth(() => rawRequest<T>(method, url, body));
 
 export const api = {
   get: <T = any>(url: string) => request<T>('GET', url),
@@ -81,7 +81,7 @@ export const api = {
 };
 
 /** Download a file from a POST that returns a blob (Excel exports). */
-export const download = (url: string, body?: unknown, fallbackName = 'export') => withPassword(() => downloadOnce(url, body, fallbackName));
+export const download = (url: string, body?: unknown, fallbackName = 'export') => retryAfterReauth(() => downloadOnce(url, body, fallbackName));
 
 async function downloadOnce(url: string, body?: unknown, fallbackName = 'export') {
   const res = await fetch(url, {
