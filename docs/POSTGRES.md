@@ -26,7 +26,7 @@ After go-live (test data wiped, real work begun) run `server/db/sql/postgres-loc
 ```bash
 npm run pg-backup -- --out backups          # pg_dump, then AES-256-GCM with the secret key
 ```
-- Needs `pg_dump` (same major version as the server or newer), `DATABASE_URL` and `COMMERCIA_SECRET_KEY`.
+- Needs `pg_dump` of the **same major version** as the server (a newer client writes dumps an older server cannot restore; the command stops if it sees that), `DATABASE_URL` and `COMMERCIA_SECRET_KEY`.
 - Sync the folder to cloud storage with a token that can only **add** files, so a break-in cannot delete the backups.
 - Run it daily from the host's scheduler (or Windows Task Scheduler). Keep at least 30 days.
 

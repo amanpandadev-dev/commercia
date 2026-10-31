@@ -3,7 +3,7 @@
 //
 //   npm run pg-backup -- [--out backups]
 //
-// Needs pg_dump on this computer (the same major version as the server, or newer) and DATABASE_URL + COMMERCIA_SECRET_KEY.
+// Needs pg_dump on this computer, of the SAME major version as the server (a newer one makes dumps an older server cannot restore, and this stops if so) and DATABASE_URL + COMMERCIA_SECRET_KEY.
 // The database password goes to pg_dump in its environment, never on a command line where other programs could see it.
 import '../lib/boot';
 import fs from 'node:fs';
@@ -13,6 +13,20 @@ import { spawnSync } from 'node:child_process';
 import { config } from '../lib/config';
 import { loadSecrets } from '../lib/secrets';
 import { lockFile } from '../lib/backupCrypto';
+
+/**
+ * A dump made by a newer pg_dump than the server can contain commands an older server rejects when the backup is restored
+ * (for example `SET transaction_timeout`, added in Postgres 17). A backup nobody can restore is worse than none, so stop here.
+ */
+function refuseNewerClient(dumpFile: string) {
+  const r = spawnSync('pg_restore', ['--list', dumpFile], { encoding: 'utf8' });
+  if (r.error || r.status !== 0) return; // no pg_restore here: the restore drill will say if the dump is unusable
+  const server = /Dumped from database version (\d+)/.exec(r.stdout)?.[1];
+  const client = /Dumped by pg_dump version (\d+)/.exec(r.stdout)?.[1];
+  if (server && client && Number(client) > Number(server)) {
+    throw new Error(`pg_dump ${client} is newer than the database server (${server}), so the backup may not restore on it. Install the PostgreSQL ${server} client tools and run this again.`);
+  }
+}
 
 export async function pgBackup(url: string, outDir: string): Promise<string> {
   const u = new URL(url);
@@ -28,6 +42,7 @@ export async function pgBackup(url: string, outDir: string): Promise<string> {
     });
     if (r.error) throw new Error(`Could not run pg_dump: ${r.error.message}. Is PostgreSQL's client installed?`);
     if (r.status !== 0) throw new Error(`pg_dump failed: ${String(r.stderr).replace(/password[^\n]*/gi, '').trim()}`);
+    refuseNewerClient(plain);
     await lockFile(plain, dest, secrets);
   } finally {
     fs.rmSync(path.dirname(plain), { recursive: true, force: true }); // the plain dump exists only for a moment

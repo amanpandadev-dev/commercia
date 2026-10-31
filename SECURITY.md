@@ -72,7 +72,7 @@ Out of scope: malware on the laptop or phones, a malicious Windows administrator
 - Adds one inbound rule: Private profile only, local subnet only (optionally Tailscale), only the Commercia port. `scripts\windows\firewall.bat allow` adds it, `remove` takes it out, `status` shows it. Not run on a real Windows machine yet.
 
 **CI** (`.github/workflows`)
-- Typecheck, tests on SQLite and Postgres, `npm audit` failing on high, gitleaks, CodeQL, Dependabot. These have not run yet: they start when the pull request is opened.
+- Typecheck, tests on SQLite and Postgres, `npm audit` failing on high, gitleaks, Dependabot. CodeQL runs through the repository's own default setup (an extra CodeQL workflow conflicts with it, so there is none). These have not run yet: they start when the pull request is opened.
 
 ## Keys and passwords: how to rotate
 

@@ -53,7 +53,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client-16 || true
+      # The runner's own pg_dump is newer than the Postgres 16 service, and its dumps cannot be restored on 16.
+      # Install the matching client from PostgreSQL's own repository and put it first on the path.
+      - name: PostgreSQL 16 client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
+      - run: pg_dump --version
       - run: npx vitest run
 
   audit:
