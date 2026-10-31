@@ -136,6 +136,7 @@ export function SettingsPage() {
             <Field label="New password"><input className="input" type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></Field>
             <button className="btn" disabled={!pw.current || pw.next.length < 10} onClick={async () => { try { await api.post('/api/account/password', pw); setPw({ current: '', next: '' }); toast('Password changed'); } catch (e) { toast((e as Error).message, 'error'); } }}>{t('Change password')}</button>
           </div>
+          <Devices />
           <div><button className="btn" onClick={async () => { await api.post('/api/account/logout-all'); window.location.reload(); }}>{t('Sign out of all devices')}</button></div>
         </div>
 
@@ -179,6 +180,30 @@ export function SettingsPage() {
           <AuthenticatorSetup onFinished={() => window.location.reload()} />
         </Modal>
       )}
+    </div>
+  );
+}
+
+/** Where you are signed in. One you do not recognise can be ended here (and then change your password). */
+function Devices() {
+  const { toast } = useApp();
+  const [rows, setRows] = useState<{ id: string; device: string; ip: string; created_at: string; last_seen: string; current: boolean }[]>([]);
+  const load = () => api.get('/api/account/sessions').then(setRows).catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
+  return (
+    <div className="col gap-4">
+      <div className="label-sm">Where you are signed in</div>
+      {rows.map((r) => (
+        <div key={r.id} className="row between wrap" style={{ fontSize: 13 }}>
+          <span>
+            <b style={{ fontWeight: 500 }}>{r.device || 'A browser'}</b> {r.current && <span className="tag ok">this device</span>}
+            <span className="faint"> · {r.ip || 'unknown address'} · last used {dateTimeOf(r.last_seen)}</span>
+          </span>
+          {!r.current && <button className="btn sm" onClick={async () => { try { await api.del(`/api/account/sessions/${r.id}`); toast('Signed out'); load(); } catch (e) { toast((e as Error).message, 'error'); } }}>Sign out</button>}
+        </div>
+      ))}
     </div>
   );
 }

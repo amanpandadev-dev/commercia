@@ -46,6 +46,17 @@ export interface SessionsTable {
   expires_at: string;
 }
 
+/** Browsers a person has logged in from (told apart by a long-lived cookie), so a login from a new one can be noticed. */
+export interface KnownDevicesTable {
+  id: Generated<number>;
+  user_id: number;
+  device_hash: string;
+  label: string;
+  first_seen: string;
+  last_seen: string;
+  last_ip: string;
+}
+
 /** One-use codes to get back in without the phone. Only a hash is kept. */
 export interface RecoveryCodesTable {
   id: Generated<number>;
@@ -465,6 +476,7 @@ export interface DB {
   supplier_ledger: SupplierLedgerTable;
   password_resets: PasswordResetsTable;
   auth_throttle: AuthThrottleTable;
+  known_devices: KnownDevicesTable;
   recovery_codes: RecoveryCodesTable;
   enrolment_codes: EnrolmentCodesTable;
   activity: ActivityTable;

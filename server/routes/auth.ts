@@ -1,5 +1,4 @@
 import { Hono, type MiddlewareHandler } from 'hono';
-import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import type { AppEnv } from '../lib/core';
@@ -17,13 +16,10 @@ import { clearSetupCode, setupAccess } from '../lib/setup';
 import { emailEnrolmentCode, issueEnrolmentCode, redeemEnrolmentCode, voidEnrolmentCodes } from '../lib/enrolment';
 import { makeRecoveryCodes, recoveryLeft, useRecoveryCode, voidRecoveryCodes } from '../lib/recovery';
 import { mailConfigured } from '../lib/mailer';
+import { IDLE_MS, clearSessionCookies, createSession, readSessionToken, rotateSession } from '../lib/sessions';
 import { askForReset, issueCode, pendingRequests, redeem, tellPasswordChanged } from '../lib/passwordReset';
 import type { User } from '../db/schema';
 import type { Role } from '../../shared/perms';
-
-const COOKIE = 'commercia_session';
-const IDLE_MS = 12 * 3600_000;
-const ABSOLUTE_MS = 30 * 24 * 3600_000;
 
 const needs2fa = (u: User, require2fa: boolean) => u.totp_enabled === 1 || (require2fa && u.role !== 'entry');
 
@@ -38,7 +34,7 @@ export const publicUser = (u: User) => ({
 });
 
 async function loadSession(c: Parameters<MiddlewareHandler<AppEnv>>[0]) {
-  const token = getCookie(c, COOKIE);
+  const token = readSessionToken(c);
   if (!token) return null;
   const { k } = c.get('db');
   const sid = sha256(token);
@@ -73,32 +69,6 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   c.set('sessionId', loaded.s.id);
   await next();
 };
-
-async function startSession(c: Parameters<MiddlewareHandler<AppEnv>>[0], user: User, opts: { enrolOk?: boolean } = {}) {
-  const token = randomToken();
-  const now = Date.now();
-  await c
-    .get('db')
-    .k.insertInto('sessions')
-    .values({
-      id: sha256(token),
-      user_id: user.id,
-      epoch: user.session_epoch,
-      totp_ok: 0,
-      enrol_ok: opts.enrolOk ? 1 : 0,
-      created_at: new Date(now).toISOString(),
-      last_seen: new Date(now).toISOString(),
-      expires_at: new Date(now + ABSOLUTE_MS).toISOString(),
-    })
-    .execute();
-  setCookie(c, COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'Lax',
-    path: '/',
-    secure: isHttps(c),
-    maxAge: ABSOLUTE_MS / 1000,
-  });
-}
 
 type Ctx = Parameters<MiddlewareHandler<AppEnv>>[0];
 
@@ -209,7 +179,7 @@ auth.post('/setup', async (c) => {
   });
   clearSetupCode();
   // The person who set the shop up is the Admin, and was just trusted with that: they may set up their authenticator at once.
-  await startSession(c, user, { enrolOk: true });
+  await createSession(c, user, { enrolOk: true });
   return c.json({ ok: true });
 });
 
@@ -240,7 +210,7 @@ auth.post('/login', async (c) => {
   await clearThrottle(k, who);
   // An older or cheaper hash is replaced now, while the password is in hand.
   if (passwordNeedsRehash(user.password_hash)) await k.updateTable('users').set({ password_hash: await hashPasswordAsync(body.password) }).where('id', '=', user.id).execute();
-  await startSession(c, user);
+  await createSession(c, user);
   await logActivity(k, user.id, 'login', 'user', user.id, `${user.name} logged in`);
   const s = await getSettings(k);
   const step = needs2fa(user, s.require_2fa === '1') ? (user.totp_enabled ? 'totp' : 'enroll') : 'done';
@@ -331,7 +301,7 @@ auth.post('/totp/verify', async (c) => {
     throw new HttpError(401, 'Wrong code', 'bad_totp');
   }
   await clearThrottle(k, keys[0]);
-  await k.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();
+  await rotateSession(c, user, { ...s, totp_ok: 1 }); // passing the second step is a step up in trust: a new token
   return c.json({ ok: true });
 });
 
@@ -349,7 +319,7 @@ auth.post('/totp/recover', async (c) => {
     throw new HttpError(401, 'That recovery code did not work. Each one works once.', 'bad_recovery');
   }
   await clearThrottle(k, keys[0]);
-  await k.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();
+  await rotateSession(c, user, { ...s, totp_ok: 1 });
   const left = await recoveryLeft(k, user.id);
   await raiseAlert(k, { action: 'recovery_used', userId: user.id, summary: `${user.name} logged in with a recovery code (${left} left) from ${clientIp(c)}`, email: true, dedupe: `recovery:${user.id}` });
   return c.json({ ok: true, left });
@@ -414,17 +384,17 @@ auth.post('/totp/confirm', async (c) => {
   await clearThrottle(k, keys[0]);
   const recoveryCodes = await k.transaction().execute(async (tx) => {
     await tx.updateTable('users').set({ totp_secret: sealTotpSecret(secrets, user.id, pending), totp_pending: null, totp_enabled: 1, totp_last_step: step }).where('id', '=', user.id).execute();
-    await tx.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();
     await raiseAlert(tx, { action: 'totp_enrolled', userId: user.id, summary: `${user.name} set up an authenticator` });
     return makeRecoveryCodes(tx, user.id);
   });
+  await rotateSession(c, user, { ...s, totp_ok: 1 });
   return c.json({ ok: true, recoveryCodes });
 });
 
 auth.post('/logout', async (c) => {
-  const token = getCookie(c, COOKIE);
+  const token = readSessionToken(c);
   if (token) await c.get('db').k.deleteFrom('sessions').where('id', '=', sha256(token)).execute();
-  deleteCookie(c, COOKIE, { path: '/' });
+  clearSessionCookies(c);
   return c.json({ ok: true });
 });
 
@@ -452,7 +422,11 @@ account.post('/password', async (c) => {
     throw new HttpError(400, 'Current password is wrong', 'bad_credentials');
   }
   await assertPassword(k, body.next, { name: user.name, email: user.email });
-  await k.updateTable('users').set({ password_hash: await hashPasswordAsync(body.next) }).where('id', '=', user.id).execute();
+  // Every other device is signed out; this one carries on under a new token.
+  const epoch = user.session_epoch + 1;
+  await k.updateTable('users').set({ password_hash: await hashPasswordAsync(body.next), session_epoch: epoch }).where('id', '=', user.id).execute();
+  const here = await k.selectFrom('sessions').selectAll().where('id', '=', c.get('sessionId')).executeTakeFirstOrThrow();
+  await rotateSession(c, { ...user, session_epoch: epoch }, here);
   await logActivity(k, user.id, 'update', 'user', user.id, `${user.name} changed their password`);
   return c.json({ ok: true });
 });
@@ -473,6 +447,25 @@ account.post('/reauth', async (c) => {
   const until = new Date(Date.now() + REAUTH_MINUTES * 60_000).toISOString();
   await k.updateTable('sessions').set({ reauth_until: until }).where('id', '=', c.get('sessionId')).execute();
   return c.json({ ok: true, until });
+});
+
+/** The places the person is signed in, so one they do not recognise can be ended. */
+account.get('/sessions', async (c) => {
+  const user = c.get('user');
+  const rows = await c.get('db').k.selectFrom('sessions').select(['id', 'device', 'ip', 'created_at', 'last_seen']).where('user_id', '=', user.id).orderBy('last_seen', 'desc').execute();
+  return c.json(rows.map((r) => ({ ...r, current: r.id === c.get('sessionId') })));
+});
+
+account.delete('/sessions/:id', async (c) => {
+  const user = c.get('user');
+  const { k } = c.get('db');
+  const id = c.req.param('id');
+  const row = await k.selectFrom('sessions').select(['id', 'device']).where('id', '=', id).where('user_id', '=', user.id).executeTakeFirst();
+  if (!row) throw new HttpError(404, 'That session is already over', 'not_found');
+  await k.deleteFrom('sessions').where('id', '=', id).execute();
+  await logActivity(k, user.id, 'update', 'user', user.id, `${user.name} signed out one device (${row.device || 'unknown'})`);
+  if (id === c.get('sessionId')) clearSessionCookies(c);
+  return c.json({ ok: true });
 });
 
 /** What the person can see about their own sign-in security. */

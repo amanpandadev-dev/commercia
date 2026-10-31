@@ -14,20 +14,29 @@ describe('authenticator: enrolment gate, replay, recovery codes', () => {
   const call = (method: string, url: string, body?: unknown, cookie = '') =>
     ctx.app.request(url, { method, headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const json = async (r: Response) => ({ status: r.status, headers: r.headers, body: (await r.json().catch(() => null)) as any });
-  /** Like the app's screen: when a risky action asks for the password again, type it and go on. */
-  const send = async (method: string, url: string, body: unknown, cookie: string) => {
-    const r = await json(await call(method, url, body, cookie));
-    if (r.status === 403 && r.body?.code === 'reauth_required') {
-      await call('POST', '/api/account/reauth', { password: 'password123' }, cookie);
-      return json(await call(method, url, body, cookie));
-    }
-    return r;
+  /** Like the app's screen: follows the session cookie when it is renewed, and when a risky action asks for the password again, types it. */
+  const as = (start: string) => {
+    let cookie = start;
+    const send = async (method: string, url: string, body: unknown) => {
+      const res = await call(method, url, body, cookie);
+      const renewed = res.headers.get('set-cookie')?.match(/(?:__Host-)?commercia_session=[^;]+/)?.[0];
+      if (renewed) cookie = renewed;
+      return json(res);
+    };
+    const withReauth = async (method: string, url: string, body: unknown) => {
+      const r = await send(method, url, body);
+      if (r.status === 403 && r.body?.code === 'reauth_required') {
+        await send('POST', '/api/account/reauth', { password: 'password123' });
+        return send(method, url, body);
+      }
+      return r;
+    };
+    return {
+      post: (url: string, body: unknown = {}) => withReauth('POST', url, body),
+      get: (url: string) => withReauth('GET', url, undefined),
+      patch: (url: string, body: unknown = {}) => withReauth('PATCH', url, body),
+    };
   };
-  const as = (cookie: string) => ({
-    post: (url: string, body: unknown = {}) => send('POST', url, body, cookie),
-    get: (url: string) => send('GET', url, undefined, cookie),
-    patch: (url: string, body: unknown = {}) => send('PATCH', url, body, cookie),
-  });
   /** Password login: the cookie of a session that still needs an authenticator step. */
   const login = async (email: string, password = 'password123') => {
     const r = await call('POST', '/api/auth/login', { email, password });
