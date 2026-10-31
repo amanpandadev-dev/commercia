@@ -44,9 +44,12 @@ export function clientIp(c: Context): string {
 /** Headers a proxy or tunnel adds. A request that has any of them did not come straight from a person at this computer. */
 const FORWARDING = ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'forwarded', 'x-real-ip', 'cf-connecting-ip', 'cf-ray', 'cf-visitor', 'cf-ipcountry'];
 
+/** The request has been passed on by a proxy or tunnel. */
+export const wasForwarded = (c: Context): boolean => FORWARDING.some((h) => c.req.header(h) !== undefined);
+
 /** The request is from a browser on this computer itself (the shop PC), not from the Wi-Fi, a phone, or a tunnel. */
 export function isShopPc(c: Context): boolean {
   const peer = peerAddress(c);
   if (peer !== null && !ipSet(LOOPBACK).has(peer)) return false;
-  return !FORWARDING.some((h) => c.req.header(h) !== undefined);
+  return !wasForwarded(c);
 }

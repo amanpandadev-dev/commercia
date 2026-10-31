@@ -31,7 +31,8 @@ async function freshDb(): Promise<Db> {
 
 export async function setup() {
   const db: Db = await freshDb();
-  const app = createApp(db);
+  // The brakes on how often one visitor may call are tested on their own (tests/edge.test.ts); here they must not get in the way.
+  const app = createApp(db, { limits: { global: 1e6, auth: 1e6, reset: 1e6, imports: 1e6, exports: 1e6 } });
   await setSetting(db.k, 'require_2fa', '0');
   await setSetting(db.k, 'shop_name', 'Sharma Kirana Store');
   // The older tests were written for prices before tax; tests of inclusive prices switch this on.

@@ -14,6 +14,8 @@ export interface AuthState {
   enrol: { codeRequired: boolean; canEmail: boolean } | null;
   shop: { name: string; nameHi: string; address: string; gstin: string };
   defaultLang: Lang;
+  /** False when this device is not the shop computer: names are not listed, and people type their email. */
+  listUsers: boolean;
   users: { id: number; name: string; role: Role }[];
   me: { id: number; name: string; role: Role; lang: Lang; email: string; totpEnabled: boolean } | null;
   step: 'login' | 'totp' | 'enroll' | 'done';
@@ -79,7 +81,7 @@ function Login({ state, t, lang, onDone, notice, onForgot }: { state: AuthState;
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const many = state.users.length > 6;
+  const many = !state.listUsers || state.users.length > 6;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -140,7 +142,7 @@ function Login({ state, t, lang, onDone, notice, onForgot }: { state: AuthState;
 
 /** "Forgot password?": ask for a code (emailed, or given by the Owner), then type it with a new password. */
 function Forgot({ state, t, lang, start, onBack, onChanged }: { state: AuthState; t: (s: string) => string; lang: Lang; start: { userId: number | null; email: string }; onBack: () => void; onChanged: () => void }) {
-  const many = state.users.length > 6;
+  const many = !state.listUsers || state.users.length > 6;
   const [userId, setUserId] = useState<number | null>(start.userId ?? (state.users.length === 1 ? state.users[0].id : null));
   const [email, setEmail] = useState(start.email);
   const [via, setVia] = useState<'email' | 'owner' | null>(null);

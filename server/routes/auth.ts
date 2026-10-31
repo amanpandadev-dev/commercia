@@ -11,7 +11,8 @@ import { readTotpSecret, sealTotpSecret } from '../lib/secrets';
 import type { Tx } from '../lib/core';
 import { POLICY, accountKey, addressKey, checkThrottle, clearThrottle, recordFailure, type Policy } from '../lib/throttle';
 import { raiseAlert } from '../lib/alerts';
-import { clientIp, isHttps } from '../lib/proxy';
+import { clientIp, isHttps, isShopPc, wasForwarded } from '../lib/proxy';
+import { config } from '../lib/config';
 import { clearSetupCode, setupAccess } from '../lib/setup';
 import { emailEnrolmentCode, issueEnrolmentCode, redeemEnrolmentCode, voidEnrolmentCodes } from '../lib/enrolment';
 import { makeRecoveryCodes, recoveryLeft, useRecoveryCode, voidRecoveryCodes } from '../lib/recovery';
@@ -120,6 +121,7 @@ auth.get('/state', async (c) => {
     } else step = 'done';
   }
   const setupNeeded = users.length === 0;
+  const listUsers = isShopPc(c) || (config().showUsersOnLan && !wasForwarded(c));
   return c.json({
     setupNeeded,
     setupCodeRequired: setupNeeded && setupAccess(c) === 'refused',
@@ -127,7 +129,9 @@ auth.get('/state', async (c) => {
     enrol: step === 'enroll' && loaded ? { codeRequired: loaded.s.enrol_ok !== 1, canEmail: mailConfigured() } : null,
     shop: { name: s.shop_name, nameHi: s.shop_name_hi, address: s.shop_address, gstin: s.shop_gstin },
     defaultLang: s.default_lang,
-    users: users.map((u) => ({ id: u.id, name: u.name, role: u.role })),
+    // The names to tap at login are shown only on the shop computer (and on the shop network if SHOW_USERS_ON_LAN=1); never through a tunnel.
+    listUsers,
+    users: listUsers ? users.map((u) => ({ id: u.id, name: u.name, role: u.role })) : [],
     me,
     step,
   });

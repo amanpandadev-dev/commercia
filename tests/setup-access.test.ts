@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { openDb } from '../server/db/index';
 import { createApp } from '../server/app';
 import { clearSetupCode, setupCode } from '../server/lib/setup';
@@ -16,7 +16,12 @@ async function fresh() {
 }
 
 describe('first-time setup', () => {
-  beforeEach(() => clearSetupCode());
+  // These tests are about setup, not about who may connect: let any address through the allow-list (tests/edge.test.ts covers that).
+  beforeEach(() => {
+    clearSetupCode();
+    process.env.ALLOWED_IPS = '0.0.0.0/0,::/0';
+  });
+  afterEach(() => delete process.env.ALLOWED_IPS);
 
   it('is allowed from a browser on the shop computer itself', async () => {
     const { from, db } = await fresh();
