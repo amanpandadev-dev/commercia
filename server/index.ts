@@ -8,11 +8,13 @@ import { openDb } from './db/index';
 import { createApp } from './app';
 import { scheduleBackups } from './lib/backup';
 import { config } from './lib/config';
+import { printSetupHelp } from './lib/setup';
 
 const { port, host } = config();
 // HOST defaults to 0.0.0.0 so phones on the shop Wi-Fi can reach the laptop (PILOT-2); set HOST=127.0.0.1 to keep it to this computer.
 
 const db = await openDb();
+const needsSetup = !(await db.k.selectFrom('users').select('id').executeTakeFirst());
 const app = createApp(db);
 
 const dist = path.resolve('dist');
@@ -31,5 +33,6 @@ serve({ fetch: app.fetch, port, hostname: host }, () => {
     for (const a of addrs ?? []) if (a.family === 'IPv4' && !a.internal && host === '0.0.0.0') console.log(`  On the shop Wi-Fi: http://${a.address}:${port}`);
   }
   console.log(`  Database: ${db.file ?? 'Postgres'}\n`);
+  if (needsSetup) printSetupHelp(port);
   if (!fs.existsSync(dist)) console.log('  (No web build found — run "npm run dev" for development or "npm start" to build and serve.)\n');
 });

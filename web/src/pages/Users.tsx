@@ -169,11 +169,35 @@ function ResetCode({ target, onClose }: { target: { id: number; name: string }; 
   );
 }
 
+/** A one-time code for setting up an authenticator, to read out to the person. */
+function EnrolCode({ target, existing, onClose }: { target: { id: number; name: string }; existing?: { code: string; expiresAt: string }; onClose: () => void }) {
+  const [res, setRes] = useState<{ code: string; expiresAt: string } | null>(existing ?? null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    if (!existing) api.post(`/api/users/${target.id}/enrolment-code`).then(setRes).catch((e) => setErr((e as Error).message));
+  }, [target.id, existing]);
+  return (
+    <Modal title={`Authenticator code for ${target.name}`} onClose={onClose} foot={<button className="btn primary" onClick={onClose}>Done</button>}>
+      {err && <div className="err">{err}</div>}
+      {res && (
+        <>
+          <div className="num" style={{ fontSize: 40, letterSpacing: 6, fontWeight: 600, textAlign: 'center', padding: '12px 0' }}>{res.code}</div>
+          <div className="muted">
+            Give this to {target.name} in person (after checking it is really them). At their next login they type it, then scan the QR code with their authenticator app.
+          </div>
+          <div className="faint" style={{ fontSize: 12 }}>It works once and stops at {timeOf(res.expiresAt)}. It is not shown again, and making another one cancels this one.</div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function UserForm({ user, onClose, onDone }: { user: U | null; onClose: () => void; onDone: () => void }) {
   const { me, toast } = useApp();
   const [f, setF] = useState({ name: user?.name ?? '', email: user?.email ?? '', role: user?.role ?? ('entry' as Role), password: '', active: user?.active ?? true });
   const [err, setErr] = useState('');
   const [codeFor, setCodeFor] = useState(false);
+  const [enrolFor, setEnrolFor] = useState<{ code: string; expiresAt: string } | 'new' | null>(null);
   const run = async (body: object, msg: string) => {
     setErr('');
     try {
@@ -224,10 +248,27 @@ function UserForm({ user, onClose, onDone }: { user: U | null; onClose: () => vo
       {user && (
         <div className="row wrap">
           <button className="btn sm" onClick={() => run({ signOutAll: true }, 'Signed out of all devices')}>Sign out of all devices</button>
-          {user.totpEnabled && <button className="btn sm" onClick={() => run({ resetTotp: true }, 'Authenticator reset — they set it up again at next login')}>Reset authenticator</button>}
+          {user.totpEnabled && (
+            <button
+              className="btn sm"
+              onClick={async () => {
+                setErr('');
+                try {
+                  const r = await api.patch(`/api/users/${user.id}`, { resetTotp: true });
+                  setEnrolFor(r.enrolment);
+                } catch (e) {
+                  setErr((e as Error).message);
+                }
+              }}
+            >
+              Reset authenticator
+            </button>
+          )}
+          {!user.totpEnabled && user.active && user.id !== me.id && <button className="btn sm" onClick={() => setEnrolFor('new')}><KeyRound size={14} /> Make an authenticator code</button>}
           {user.active && user.id !== me.id && <button className="btn sm" onClick={() => setCodeFor(true)}><KeyRound size={14} /> Make a reset code</button>}
         </div>
       )}
+      {enrolFor && user && <EnrolCode target={{ id: user.id, name: user.name }} existing={enrolFor === 'new' ? undefined : enrolFor} onClose={() => { setEnrolFor(null); onDone(); }} />}
       {codeFor && user && <ResetCode target={{ id: user.id, name: user.name }} onClose={() => setCodeFor(false)} />}
     </Modal>
   );

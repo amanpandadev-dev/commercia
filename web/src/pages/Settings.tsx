@@ -3,6 +3,7 @@ import { Database, Download, ShieldCheck } from 'lucide-react';
 import { api, download } from '../api';
 import { useApp, type Settings } from '../state';
 import { Field, Modal, Seg } from '../components/ui';
+import { AuthenticatorSetup } from '../components/AuthenticatorSetup';
 import { BillDoc, type BillDetail } from '../components/BillDoc';
 import { dateTimeOf } from '../format';
 import { istDate } from '../../../shared/dates';
@@ -31,8 +32,7 @@ export function SettingsPage() {
   const [pw, setPw] = useState({ current: '', next: '' });
   const [schemeForm, setSchemeForm] = useState({ scheme: 'regular', from: istDate() });
   const [reset, setReset] = useState(false);
-  const [enroll, setEnroll] = useState<{ secret: string; qr: string } | null>(null);
-  const [code, setCode] = useState('');
+  const [enroll, setEnroll] = useState(false);
   const edit = can('settings.edit');
   useEffect(() => setS(settings), [settings]);
   useEffect(() => {
@@ -128,7 +128,8 @@ export function SettingsPage() {
           )}
           <div className="row wrap">
             <ShieldCheck size={16} /> Your authenticator: {me.totpEnabled ? <span className="tag ok">On</span> : <span className="tag neutral">Off</span>}
-            {!me.totpEnabled && <button className="btn sm" onClick={async () => setEnroll(await api.post('/api/auth/totp/enroll'))}>Set up</button>}
+            {!me.totpEnabled && <button className="btn sm" onClick={() => setEnroll(true)}>Set up</button>}
+            {me.totpEnabled && <RecoveryCodes />}
           </div>
           <div className="row wrap" style={{ alignItems: 'flex-end' }}>
             <Field label="Current password"><input className="input" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Field>
@@ -174,13 +175,57 @@ export function SettingsPage() {
 
       {reset && <ResetDialog shopName={s.shop_name} onClose={() => setReset(false)} />}
       {enroll && (
-        <Modal title="Set up your authenticator" onClose={() => setEnroll(null)} foot={<button className="btn primary" disabled={code.length !== 6} onClick={async () => { try { await api.post('/api/auth/totp/confirm', { code }); toast('Authenticator on'); window.location.reload(); } catch (e) { toast((e as Error).message, 'error'); } }}>Turn on</button>}>
-          <img src={enroll.qr} alt="QR code" width={180} height={180} style={{ background: '#fff', borderRadius: 8 }} />
-          <code>{enroll.secret.match(/.{1,4}/g)?.join(' ')}</code>
-          <input className="input" inputMode="numeric" maxLength={6} placeholder="6-digit code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />
+        <Modal title="Set up your authenticator" onClose={() => setEnroll(false)}>
+          <AuthenticatorSetup onFinished={() => window.location.reload()} />
         </Modal>
       )}
     </div>
+  );
+}
+
+/** New recovery codes for a lost phone: needs the password, replaces the old set, and shows the new ones once. */
+function RecoveryCodes() {
+  const { toast } = useApp();
+  const [left, setLeft] = useState<number | null>(null);
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [err, setErr] = useState('');
+  const load = () => api.get('/api/account/security').then((r) => setLeft(r.recoveryLeft)).catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
+  return (
+    <>
+      <span className="muted">{left === null ? '' : left === 0 ? 'No recovery codes left.' : `${left} recovery code${left === 1 ? '' : 's'} left.`}</span>
+      <button className="btn sm" onClick={() => { setOpen(true); setCodes(null); setPassword(''); setErr(''); }}>Make new recovery codes</button>
+      {open && (
+        <Modal
+          title="Recovery codes"
+          onClose={() => { setOpen(false); load(); }}
+          foot={
+            codes ? <button className="btn primary" onClick={() => { setOpen(false); load(); }}>I have saved them</button> : (
+              <>
+                {err && <span className="err grow">{err}</span>}
+                <button className="btn primary" disabled={!password} onClick={async () => { try { setCodes((await api.post('/api/account/recovery-codes', { password })).recoveryCodes); toast('New recovery codes made'); } catch (e) { setErr((e as Error).message); } }}>Make new codes</button>
+              </>
+            )
+          }
+        >
+          {codes ? (
+            <>
+              <p className="muted" style={{ margin: 0 }}>Each works once, in place of an authenticator code, if you lose your phone. The old ones no longer work. They are shown only now: write them down and keep them safe.</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontFamily: 'monospace', fontSize: 15 }}>{codes.map((c) => <span key={c}>{c}</span>)}</div>
+            </>
+          ) : (
+            <>
+              <p className="muted" style={{ margin: 0 }}>This makes ten new codes and cancels the ones you have. Type your password to confirm.</p>
+              <input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-label="Your password" autoFocus />
+            </>
+          )}
+        </Modal>
+      )}
+    </>
   );
 }
 

@@ -4,13 +4,18 @@ import QRCode from 'qrcode';
 import { z } from 'zod';
 import type { AppEnv } from '../lib/core';
 import { HttpError, bad, logActivity, need } from '../lib/core';
-import { hashPassword, newTotpSecret, randomToken, sha256, verifyPassword, verifyTotp } from '../lib/crypto';
+import { hashPassword, newTotpSecret, randomToken, sha256, verifyPassword, verifyTotpStep } from '../lib/crypto';
 import { nowIso } from '../db/index';
 import { getSettings, setSetting } from '../lib/settings';
 import { readTotpSecret, sealTotpSecret } from '../lib/secrets';
+import type { Tx } from '../lib/core';
 import { POLICY, accountKey, addressKey, checkThrottle, clearThrottle, recordFailure, type Policy } from '../lib/throttle';
 import { raiseAlert } from '../lib/alerts';
 import { clientIp, isHttps } from '../lib/proxy';
+import { clearSetupCode, setupAccess } from '../lib/setup';
+import { emailEnrolmentCode, issueEnrolmentCode, redeemEnrolmentCode, voidEnrolmentCodes } from '../lib/enrolment';
+import { makeRecoveryCodes, recoveryLeft, useRecoveryCode, voidRecoveryCodes } from '../lib/recovery';
+import { mailConfigured } from '../lib/mailer';
 import { askForReset, issueCode, pendingRequests, redeem, tellPasswordChanged } from '../lib/passwordReset';
 import type { User } from '../db/schema';
 import type { Role } from '../../shared/perms';
@@ -68,7 +73,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
-async function startSession(c: Parameters<MiddlewareHandler<AppEnv>>[0], user: User) {
+async function startSession(c: Parameters<MiddlewareHandler<AppEnv>>[0], user: User, opts: { enrolOk?: boolean } = {}) {
   const token = randomToken();
   const now = Date.now();
   await c
@@ -79,6 +84,7 @@ async function startSession(c: Parameters<MiddlewareHandler<AppEnv>>[0], user: U
       user_id: user.id,
       epoch: user.session_epoch,
       totp_ok: 0,
+      enrol_ok: opts.enrolOk ? 1 : 0,
       created_at: new Date(now).toISOString(),
       last_seen: new Date(now).toISOString(),
       expires_at: new Date(now + ABSOLUTE_MS).toISOString(),
@@ -136,8 +142,12 @@ auth.get('/state', async (c) => {
       step = loaded.user.totp_enabled === 1 ? 'totp' : 'enroll';
     } else step = 'done';
   }
+  const setupNeeded = users.length === 0;
   return c.json({
-    setupNeeded: users.length === 0,
+    setupNeeded,
+    setupCodeRequired: setupNeeded && setupAccess(c) === 'refused',
+    emailEnabled: mailConfigured(),
+    enrol: step === 'enroll' && loaded ? { codeRequired: loaded.s.enrol_ok !== 1, canEmail: mailConfigured() } : null,
     shop: { name: s.shop_name, nameHi: s.shop_name_hi, address: s.shop_address, gstin: s.shop_gstin },
     defaultLang: s.default_lang,
     users: users.map((u) => ({ id: u.id, name: u.name, role: u.role })),
@@ -148,30 +158,49 @@ auth.get('/state', async (c) => {
 
 auth.post('/setup', async (c) => {
   const body = z
-    .object({ shopName: z.string().min(1), name: z.string().min(1), email: z.string().email(), password: passwordSchema })
+    .object({ shopName: z.string().min(1), name: z.string().min(1), email: z.string().email(), password: passwordSchema, setupCode: z.string().optional() })
     .parse(await c.req.json());
   const { k } = c.get('db');
   const count = await k.selectFrom('users').select(({ fn }) => fn.countAll().as('n')).executeTakeFirst();
   if (Number(count?.n) > 0) throw new HttpError(409, 'Already set up', 'conflict');
-  await setSetting(k, 'shop_name', body.shopName);
-  const user = await k
-    .insertInto('users')
-    .values({
-      name: body.name,
-      email: body.email.toLowerCase(),
-      password_hash: hashPassword(body.password),
-      role: 'admin',
-      active: 1,
-      lang: 'en',
-      totp_enabled: 0,
-      session_epoch: 0,
-      totp_secret: null,
-      created_at: nowIso(),
-    })
-    .returningAll()
-    .executeTakeFirstOrThrow();
-  await logActivity(k, user.id, 'create', 'user', user.id, `Set up shop "${body.shopName}" with admin ${body.name}`);
-  await startSession(c, user);
+  // Only from the shop computer itself, or with the setup code printed in its console.
+  const from = addressKey(clientIp(c));
+  await refuseIfLocked(c, [`setup:${from}`]);
+  if (setupAccess(c, body.setupCode) === 'refused') {
+    await countFailure(c, [{ key: `setup:${from}`, policy: POLICY.setup, what: `Setting up the shop from ${clientIp(c)}` }]);
+    await raiseAlert(k, { action: 'setup_refused', summary: `First-time setup was refused from ${clientIp(c)}: it must be done on the shop computer, or with the setup code shown there`, email: false });
+    throw new HttpError(403, 'Set-up can only be done on the shop computer, or with the setup code shown in its window.', 'setup_forbidden');
+  }
+  const user = await k.transaction().execute(async (tx) => {
+    // Claiming the flag is atomic: of two set-ups at once, one wins.
+    try {
+      await tx.insertInto('settings').values({ key: 'setup_done', value: '1' }).execute();
+    } catch {
+      throw new HttpError(409, 'Already set up', 'conflict');
+    }
+    await setSetting(tx, 'shop_name', body.shopName);
+    const u = await tx
+      .insertInto('users')
+      .values({
+        name: body.name,
+        email: body.email.toLowerCase(),
+        password_hash: hashPassword(body.password),
+        role: 'admin',
+        active: 1,
+        lang: 'en',
+        totp_enabled: 0,
+        session_epoch: 0,
+        totp_secret: null,
+        created_at: nowIso(),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await logActivity(tx, u.id, 'create', 'user', u.id, `Set up shop "${body.shopName}" with admin ${body.name}`);
+    return u;
+  });
+  clearSetupCode();
+  // The person who set the shop up is the Admin, and was just trusted with that: they may set up their authenticator at once.
+  await startSession(c, user, { enrolOk: true });
   return c.json({ ok: true });
 });
 
@@ -257,31 +286,100 @@ async function partialSession(c: Parameters<MiddlewareHandler<AppEnv>>[0]) {
   return loaded;
 }
 
+/** Takes a time step for a person. False if that step, or a later one, was already taken: a code is never accepted twice. */
+async function takeStep(k: Tx, userId: number, step: number): Promise<boolean> {
+  const r = await k
+    .updateTable('users')
+    .set({ totp_last_step: step })
+    .where('id', '=', userId)
+    .where((eb) => eb.or([eb('totp_last_step', 'is', null), eb('totp_last_step', '<', step)]))
+    .executeTakeFirst();
+  return Number(r.numUpdatedRows) === 1;
+}
+
+const codeGuard = (c: Ctx, user: User) => [`code:u${user.id}`, addressKey(clientIp(c))];
+const codeFailure = (c: Ctx, user: User, keys: string[]) =>
+  countFailure(c, [
+    { key: keys[0], policy: POLICY.code, what: `${user.name}'s codes` },
+    { key: keys[1], policy: POLICY.address, what: `The address ${clientIp(c)}` },
+  ]);
+
 auth.post('/totp/verify', async (c) => {
   const { code } = z.object({ code: z.string() }).parse(await c.req.json());
   const { s, user } = await partialSession(c);
-  const guardKeys = [`code:u${user.id}`, addressKey(clientIp(c))];
-  await refuseIfLocked(c, guardKeys);
+  const { k } = c.get('db');
+  const keys = codeGuard(c, user);
+  await refuseIfLocked(c, keys);
   const secret = readTotpSecret(c.get('db').secrets, user);
-  if (!secret || user.totp_enabled !== 1 || !verifyTotp(secret, code)) {
-    await logActivity(c.get('db').k, user.id, 'login_failed', 'user', user.id, `Wrong authenticator code for ${user.name} (from ${clientIp(c)})`);
-    await countFailure(c, [
-      { key: guardKeys[0], policy: POLICY.code, what: `${user.name}'s authenticator codes` },
-      { key: guardKeys[1], policy: POLICY.address, what: `The address ${clientIp(c)}` },
-    ]);
+  const step = secret && user.totp_enabled === 1 ? verifyTotpStep(secret, code) : null;
+  const fresh = step !== null && (await takeStep(k, user.id, step));
+  if (!fresh) {
+    await logActivity(k, user.id, 'login_failed', 'user', user.id, `${step !== null ? 'An authenticator code was used a second time for' : 'Wrong authenticator code for'} ${user.name} (from ${clientIp(c)})`);
+    await codeFailure(c, user, keys);
     throw new HttpError(401, 'Wrong code', 'bad_totp');
   }
-  await clearThrottle(c.get('db').k, guardKeys[0]);
-  await c.get('db').k.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();
+  await clearThrottle(k, keys[0]);
+  await k.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();
   return c.json({ ok: true });
 });
 
-/** First-time setup of an authenticator app. */
+/** A recovery code in place of an authenticator code (lost phone). Works once. */
+auth.post('/totp/recover', async (c) => {
+  const { code } = z.object({ code: z.string() }).parse(await c.req.json());
+  const { s, user } = await partialSession(c);
+  const { k } = c.get('db');
+  if (user.totp_enabled !== 1) throw bad('There is no authenticator to recover');
+  const keys = codeGuard(c, user);
+  await refuseIfLocked(c, keys);
+  if (!(await useRecoveryCode(k, user.id, code))) {
+    await logActivity(k, user.id, 'login_failed', 'user', user.id, `Wrong recovery code for ${user.name} (from ${clientIp(c)})`);
+    await codeFailure(c, user, keys);
+    throw new HttpError(401, 'That recovery code did not work. Each one works once.', 'bad_recovery');
+  }
+  await clearThrottle(k, keys[0]);
+  await k.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();
+  const left = await recoveryLeft(k, user.id);
+  await raiseAlert(k, { action: 'recovery_used', userId: user.id, summary: `${user.name} logged in with a recovery code (${left} left) from ${clientIp(c)}`, email: true, dedupe: `recovery:${user.id}` });
+  return c.json({ ok: true, left });
+});
+
+/** Setting up (or replacing) an authenticator needs proof it is really the person: first an enrolment code, or an authenticator already in use. */
+const mayEnrol = (s: { enrol_ok: number; totp_ok: number }, user: User) => (user.totp_enabled === 1 ? s.totp_ok === 1 : s.enrol_ok === 1);
+const needCode = () => new HttpError(403, 'Enter the one-time enrolment code first. Ask the Admin or an Owner for one, or have one emailed to you.', 'enrol_code_required');
+
+auth.post('/totp/enrol-code', async (c) => {
+  const { code } = z.object({ code: z.string() }).parse(await c.req.json());
+  const { s, user } = await partialSession(c);
+  const { k } = c.get('db');
+  const keys = codeGuard(c, user);
+  await refuseIfLocked(c, keys);
+  if (!(await k.transaction().execute((tx) => redeemEnrolmentCode(tx, user, code)))) {
+    await logActivity(k, user.id, 'login_failed', 'user', user.id, `Wrong enrolment code for ${user.name} (from ${clientIp(c)})`);
+    await codeFailure(c, user, keys);
+    throw new HttpError(400, 'That code did not work or has expired. Ask for a new one.', 'bad_code');
+  }
+  await clearThrottle(k, keys[0]);
+  await k.updateTable('sessions').set({ enrol_ok: 1 }).where('id', '=', s.id).execute();
+  return c.json({ ok: true });
+});
+
+/** Emails an enrolment code to the address on the account, when email is set up. The answer is the same either way. */
+auth.post('/totp/enrol-code/email', async (c) => {
+  const { user } = await partialSession(c);
+  const { k } = c.get('db');
+  const guard = [`enrol-mail-ip:${clientIp(c)}`, `enrol-mail:u${user.id}`];
+  await refuseIfLocked(c, guard);
+  for (const key of guard) await recordFailure(k, key, POLICY.reset);
+  const sent = user.totp_enabled === 1 ? false : await k.transaction().execute(async (tx) => emailEnrolmentCode(tx, user, (await getSettings(tx)).shop_name));
+  return c.json({ via: sent ? 'email' : 'admin' });
+});
+
+/** First-time setup of an authenticator app. The new secret waits in totp_pending until its first code is confirmed. */
 auth.post('/totp/enroll', async (c) => {
   const { s, user } = await partialSession(c);
-  if (user.totp_enabled === 1 && s.totp_ok !== 1) throw new HttpError(403, 'Enter your current code first', 'forbidden');
+  if (!mayEnrol(s, user)) throw needCode();
   const secret = newTotpSecret();
-  await c.get('db').k.updateTable('users').set({ totp_secret: sealTotpSecret(c.get('db').secrets, user.id, secret) }).where('id', '=', user.id).execute();
+  await c.get('db').k.updateTable('users').set({ totp_pending: sealTotpSecret(c.get('db').secrets, user.id, secret, 'totp_pending') }).where('id', '=', user.id).execute();
   const shop = (await getSettings(c.get('db').k)).shop_name;
   const uri = `otpauth://totp/${encodeURIComponent(`Commercia (${shop})`)}:${encodeURIComponent(user.email)}?secret=${secret}&issuer=Commercia`;
   const qr = await QRCode.toDataURL(uri, { margin: 1, width: 220 });
@@ -291,22 +389,24 @@ auth.post('/totp/enroll', async (c) => {
 auth.post('/totp/confirm', async (c) => {
   const { code } = z.object({ code: z.string() }).parse(await c.req.json());
   const { s, user } = await partialSession(c);
-  const guardKeys = [`code:u${user.id}`, addressKey(clientIp(c))];
-  await refuseIfLocked(c, guardKeys);
-  const pending = readTotpSecret(c.get('db').secrets, user);
-  if (!pending || !verifyTotp(pending, code)) {
-    await countFailure(c, [
-      { key: guardKeys[0], policy: POLICY.code, what: `${user.name}'s authenticator codes` },
-      { key: guardKeys[1], policy: POLICY.address, what: `The address ${clientIp(c)}` },
-    ]);
+  if (!mayEnrol(s, user)) throw needCode();
+  const { k, secrets } = c.get('db');
+  const keys = codeGuard(c, user);
+  await refuseIfLocked(c, keys);
+  const pending = readTotpSecret(secrets, user, 'totp_pending');
+  const step = pending ? verifyTotpStep(pending, code) : null;
+  if (!pending || step === null) {
+    await codeFailure(c, user, keys);
     throw new HttpError(400, 'That code did not match', 'bad_totp');
   }
-  await clearThrottle(c.get('db').k, guardKeys[0]);
-  const { k } = c.get('db');
-  await k.updateTable('users').set({ totp_enabled: 1 }).where('id', '=', user.id).execute();
-  await k.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();
-  await logActivity(k, user.id, 'update', 'user', user.id, `${user.name} turned on authenticator codes`);
-  return c.json({ ok: true });
+  await clearThrottle(k, keys[0]);
+  const recoveryCodes = await k.transaction().execute(async (tx) => {
+    await tx.updateTable('users').set({ totp_secret: sealTotpSecret(secrets, user.id, pending), totp_pending: null, totp_enabled: 1, totp_last_step: step }).where('id', '=', user.id).execute();
+    await tx.updateTable('sessions').set({ totp_ok: 1 }).where('id', '=', s.id).execute();
+    await raiseAlert(tx, { action: 'totp_enrolled', userId: user.id, summary: `${user.name} set up an authenticator` });
+    return makeRecoveryCodes(tx, user.id);
+  });
+  return c.json({ ok: true, recoveryCodes });
 });
 
 auth.post('/logout', async (c) => {
@@ -337,6 +437,29 @@ account.post('/password', async (c) => {
   await k.updateTable('users').set({ password_hash: hashPassword(body.next) }).where('id', '=', user.id).execute();
   await logActivity(k, user.id, 'update', 'user', user.id, `${user.name} changed their password`);
   return c.json({ ok: true });
+});
+
+/** What the person can see about their own sign-in security. */
+account.get('/security', async (c) => {
+  const user = c.get('user');
+  return c.json({ totpEnabled: user.totp_enabled === 1, recoveryLeft: await recoveryLeft(c.get('db').k, user.id) });
+});
+
+/** New recovery codes (the old ones stop working). Needs the password again, and is only for someone who has an authenticator. */
+account.post('/recovery-codes', async (c) => {
+  const { password } = z.object({ password: z.string() }).parse(await c.req.json());
+  const user = c.get('user');
+  const { k } = c.get('db');
+  if (user.totp_enabled !== 1) throw bad('Set up an authenticator first');
+  const keys = [accountKey(user), addressKey(clientIp(c))];
+  await refuseIfLocked(c, keys, password);
+  if (!verifyPassword(password, user.password_hash)) {
+    await countFailure(c, [{ key: keys[0], policy: POLICY.account, what: `${user.name}'s account` }, { key: keys[1], policy: POLICY.address, what: `The address ${clientIp(c)}` }]);
+    throw new HttpError(400, 'Wrong password', 'bad_credentials');
+  }
+  const codes = await k.transaction().execute((tx) => makeRecoveryCodes(tx, user.id));
+  await logActivity(k, user.id, 'update', 'user', user.id, `${user.name} made new recovery codes`);
+  return c.json({ recoveryCodes: codes });
 });
 
 account.post('/lang', async (c) => {
@@ -419,6 +542,18 @@ users.post('/:id/reset-code', async (c) => {
   return c.json({ code, expiresAt, name: target.name });
 });
 
+/** A one-time code that lets someone set up their authenticator. Shown once, works for a day. */
+users.post('/:id/enrolment-code', async (c) => {
+  const actor = await need(c, 'users.manage');
+  const { k } = c.get('db');
+  const target = await k.selectFrom('users').selectAll().where('id', '=', Number(c.req.param('id'))).executeTakeFirst();
+  if (!target) throw new HttpError(404, 'User not found', 'not_found');
+  guardAdmin(actor, target.role);
+  if (target.active !== 1) throw bad('This person is deactivated');
+  if (target.totp_enabled === 1) throw bad('This person already has an authenticator. Use "Reset authenticator" if their phone is lost.');
+  return c.json({ ...(await k.transaction().execute((tx) => issueEnrolmentCode(tx, actor, target))), name: target.name });
+});
+
 users.patch('/:id', async (c) => {
   const actor = await need(c, 'users.manage');
   const id = Number(c.req.param('id'));
@@ -458,8 +593,11 @@ users.patch('/:id', async (c) => {
   if (body.resetTotp) {
     patch.totp_enabled = 0;
     patch.totp_secret = null;
+    patch.totp_pending = null;
+    patch.totp_last_step = null;
     notes.push('authenticator reset');
   }
+  if (body.active === false) await voidEnrolmentCodes(k, id);
   if (body.active === false || body.password || body.signOutAll || body.role) {
     patch.session_epoch = target.session_epoch + 1;
     if (body.signOutAll) notes.push('signed out of all devices');
@@ -467,5 +605,14 @@ users.patch('/:id', async (c) => {
   if (Object.keys(patch).length) await k.updateTable('users').set(patch).where('id', '=', id).execute();
   await logActivity(k, actor.id, 'update', 'user', id, `Updated ${target.name}: ${notes.join(', ') || 'details'}`);
   const u = await k.selectFrom('users').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
-  return c.json(publicUser(u));
+  // Setting up an authenticator again needs an enrolment code, so a reset does not leave the door open to whoever knows the password.
+  let enrolment: { code: string; expiresAt: string } | null = null;
+  if (body.resetTotp) {
+    enrolment = await k.transaction().execute(async (tx) => {
+      await voidRecoveryCodes(tx, id);
+      await raiseAlert(tx, { action: 'totp_reset', userId: actor.id, entityId: id, summary: `${actor.name} reset the authenticator of ${target.name}`, email: true, dedupe: `totp_reset:${id}` });
+      return issueEnrolmentCode(tx, actor, u);
+    });
+  }
+  return c.json({ ...publicUser(u), enrolment });
 });

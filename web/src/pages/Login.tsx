@@ -4,10 +4,14 @@ import { api } from '../api';
 import { translate, type Lang } from '../i18n';
 import { storedLang } from '../state';
 import { Avatar, Seg } from '../components/ui';
+import { AuthenticatorSetup } from '../components/AuthenticatorSetup';
 import { ROLE_LABEL, type Role } from '../../../shared/perms';
 
 export interface AuthState {
   setupNeeded: boolean;
+  setupCodeRequired: boolean;
+  emailEnabled: boolean;
+  enrol: { codeRequired: boolean; canEmail: boolean } | null;
   shop: { name: string; nameHi: string; address: string; gstin: string };
   defaultLang: Lang;
   users: { id: number; name: string; role: Role }[];
@@ -51,11 +55,11 @@ export function AuthScreen({ state, onDone }: { state: AuthState; onDone: () => 
           <Seg value={lang} onChange={changeLang} options={[{ value: 'en', label: 'EN' }, { value: 'hi', label: 'हिं' }]} />
         </div>
         {state.setupNeeded ? (
-          <Setup t={t} onDone={onDone} />
+          <Setup t={t} onDone={onDone} codeRequired={state.setupCodeRequired} />
         ) : state.step === 'totp' ? (
           <Totp t={t} onDone={onDone} />
         ) : state.step === 'enroll' ? (
-          <Enroll onDone={onDone} />
+          <Enroll canEmail={state.emailEnabled} onDone={onDone} />
         ) : forgot ? (
           <Forgot state={state} t={t} lang={lang} start={forgot} onBack={() => setForgot(null)} onChanged={() => { setForgot(null); setNotice('Password changed. Log in with the new one.'); }} />
         ) : (
@@ -238,14 +242,16 @@ function Forgot({ state, t, lang, start, onBack, onChanged }: { state: AuthState
 
 function Totp({ t, onDone }: { t: (s: string) => string; onDone: () => void }) {
   const [code, setCode] = useState('');
+  const [recovery, setRecovery] = useState(false);
   const [err, setErr] = useState('');
   return (
     <form
       className="col gap-16"
       onSubmit={async (e) => {
         e.preventDefault();
+        setErr('');
         try {
-          await api.post('/api/auth/totp/verify', { code });
+          await api.post(recovery ? '/api/auth/totp/recover' : '/api/auth/totp/verify', { code });
           onDone();
         } catch (e) {
           setErr((e as Error).message);
@@ -253,61 +259,40 @@ function Totp({ t, onDone }: { t: (s: string) => string; onDone: () => void }) {
       }}
     >
       <h2 style={{ fontSize: 20 }}>
-        <ShieldCheck size={20} style={{ verticalAlign: -3 }} /> Authenticator code
+        <ShieldCheck size={20} style={{ verticalAlign: -3 }} /> {recovery ? 'Recovery code' : 'Authenticator code'}
       </h2>
-      <p className="muted" style={{ margin: 0 }}>Open your authenticator app and type the 6-digit code for Commercia.</p>
-      <input className="input" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} autoFocus style={{ fontSize: 24, letterSpacing: 8, textAlign: 'center' }} />
+      {recovery ? (
+        <>
+          <p className="muted" style={{ margin: 0 }}>Lost your phone? Type one of the recovery codes you saved when you set up the authenticator. Each works once.</p>
+          <input className="input" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="XXXXX-XXXXX" autoFocus maxLength={12} aria-label="Recovery code" style={{ fontSize: 20, letterSpacing: 3, textAlign: 'center' }} />
+        </>
+      ) : (
+        <>
+          <p className="muted" style={{ margin: 0 }}>Open your authenticator app and type the 6-digit code for Commercia.</p>
+          <input className="input" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} autoFocus style={{ fontSize: 24, letterSpacing: 8, textAlign: 'center' }} aria-label="Authenticator code" />
+        </>
+      )}
       {err && <div className="err">{err}</div>}
-      <button className="btn primary big" disabled={code.length !== 6}>{t('Log in')}</button>
+      <button className="btn primary big" disabled={recovery ? code.replace(/[^A-Z0-9]/gi, '').length < 10 : code.length !== 6}>{t('Log in')}</button>
+      <button type="button" className="btn ghost" onClick={() => { setRecovery(!recovery); setCode(''); setErr(''); }}>{recovery ? 'Use the authenticator app instead' : 'Lost your phone? Use a recovery code'}</button>
       <button type="button" className="btn ghost" onClick={async () => { await api.post('/api/auth/logout'); onDone(); }}>Use another account</button>
     </form>
   );
 }
 
-/** Owners and the Admin set up an authenticator app on first login (AUTH-2). */
-function Enroll({ onDone }: { onDone: () => void }) {
-  const [data, setData] = useState<{ secret: string; qr: string } | null>(null);
-  const [code, setCode] = useState('');
-  const [err, setErr] = useState('');
-  useEffect(() => {
-    api.post('/api/auth/totp/enroll').then(setData).catch((e) => setErr(e.message));
-  }, []);
+/** Owners and the Admin set up an authenticator app on first login (AUTH-2): an enrolment code first, then the QR code. */
+function Enroll({ canEmail, onDone }: { canEmail: boolean; onDone: () => void }) {
   return (
-    <form
-      className="col gap-16"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        try {
-          await api.post('/api/auth/totp/confirm', { code });
-          onDone();
-        } catch (e) {
-          setErr((e as Error).message);
-        }
-      }}
-    >
-      <h2 style={{ fontSize: 20 }}>Set up your authenticator</h2>
-      <p className="muted" style={{ margin: 0 }}>
-        Owners and the Admin confirm each login with a code. Scan this with Google Authenticator, Microsoft Authenticator or any TOTP app, then type the code it shows.
-      </p>
-      {data && (
-        <div className="row top">
-          <img src={data.qr} alt="QR code for your authenticator app" width={160} height={160} style={{ borderRadius: 8, background: '#fff' }} />
-          <div className="col gap-4">
-            <span className="label-sm">Or type this key</span>
-            <code style={{ wordBreak: 'break-all', fontSize: 13 }}>{data.secret.match(/.{1,4}/g)?.join(' ')}</code>
-          </div>
-        </div>
-      )}
-      <input className="input" inputMode="numeric" maxLength={6} placeholder="6-digit code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} style={{ fontSize: 22, letterSpacing: 6, textAlign: 'center' }} />
-      {err && <div className="err">{err}</div>}
-      <button className="btn primary big" disabled={code.length !== 6}>Turn on and continue</button>
-      <button type="button" className="btn ghost" onClick={async () => { await api.post('/api/auth/logout'); onDone(); }}>Log out</button>
-    </form>
+    <AuthenticatorSetup
+      canEmail={canEmail}
+      onFinished={onDone}
+      footer={<button type="button" className="btn ghost" onClick={async () => { await api.post('/api/auth/logout'); onDone(); }}>Log out</button>}
+    />
   );
 }
 
-function Setup({ t, onDone }: { t: (s: string) => string; onDone: () => void }) {
-  const [f, setF] = useState({ shopName: '', name: '', email: '', password: '' });
+function Setup({ t, onDone, codeRequired }: { t: (s: string) => string; onDone: () => void; codeRequired: boolean }) {
+  const [f, setF] = useState({ shopName: '', name: '', email: '', password: '', setupCode: '' });
   const [err, setErr] = useState('');
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   return (
@@ -329,8 +314,15 @@ function Setup({ t, onDone }: { t: (s: string) => string; onDone: () => void }) 
       <div className="field"><label>Your name</label><input className="input" value={f.name} onChange={set('name')} /></div>
       <div className="field"><label>Email</label><input className="input" type="email" value={f.email} onChange={set('email')} autoComplete="username" /></div>
       <div className="field"><label>{t('Password')} (8+ characters)</label><input className="input" type="password" value={f.password} onChange={set('password')} autoComplete="new-password" /></div>
+      {codeRequired && (
+        <div className="field">
+          <label>Setup code</label>
+          <input className="input" value={f.setupCode} onChange={(e) => setF({ ...f, setupCode: e.target.value.toUpperCase() })} placeholder="XXXX-XXXX" maxLength={12} />
+          <span className="faint" style={{ fontSize: 12 }}>You are not on the shop computer. The code is shown in the window where Commercia is running there.</span>
+        </div>
+      )}
       {err && <div className="err">{err}</div>}
-      <button className="btn primary big" disabled={!f.shopName || !f.name || !f.email || f.password.length < 8}>Create shop</button>
+      <button className="btn primary big" disabled={!f.shopName || !f.name || !f.email || f.password.length < 8 || (codeRequired && !f.setupCode.trim())}>Create shop</button>
     </form>
   );
 }

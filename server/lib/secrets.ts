@@ -119,14 +119,18 @@ export function loadSecrets(o: LoadOptions): Secrets {
 
 // ---- Authenticator secrets ----
 // Stored locked ("enc:v1:…"); a plain value (a database from before this existed) is still read, and locked on the next start.
-export const totpContext = (userId: number) => `totp:${userId}`;
+// Two columns: the one in use, and one being set up (it replaces the first only when its first code is confirmed).
+export type TotpColumn = 'totp_secret' | 'totp_pending';
+const CONTEXT: Record<TotpColumn, string> = { totp_secret: 'totp', totp_pending: 'totp-pending' };
+export const totpContext = (userId: number, column: TotpColumn = 'totp_secret') => `${CONTEXT[column]}:${userId}`;
 
-export function readTotpSecret(secrets: Secrets, user: { id: number; totp_secret: string | null }): string | null {
-  if (!user.totp_secret) return null;
-  return secrets.isSealed(user.totp_secret) ? secrets.open(user.totp_secret, totpContext(user.id)) : user.totp_secret;
+export function readTotpSecret(secrets: Secrets, user: { id: number; totp_secret?: string | null; totp_pending?: string | null }, column: TotpColumn = 'totp_secret'): string | null {
+  const stored = user[column];
+  if (!stored) return null;
+  return secrets.isSealed(stored) ? secrets.open(stored, totpContext(user.id, column)) : stored;
 }
 
-export const sealTotpSecret = (secrets: Secrets, userId: number, plain: string) => secrets.seal(plain, totpContext(userId));
+export const sealTotpSecret = (secrets: Secrets, userId: number, plain: string, column: TotpColumn = 'totp_secret') => secrets.seal(plain, totpContext(userId, column));
 
 interface TotpRows {
   selectFrom: (t: 'users') => any;
@@ -135,46 +139,36 @@ interface TotpRows {
 
 /**
  * Locks every plain authenticator secret, and re-locks any made with an older key. Safe to run on every start.
- * Returns how many rows it changed. Throws SecretKeyError if some cannot be opened with any key we have.
+ * Returns how many values it changed. Throws SecretKeyError if some cannot be opened with any key we have.
  */
 export async function protectTotpSecrets(k: TotpRows, secrets: Secrets, opts: { discardUnreadable?: boolean } = {}): Promise<{ changed: number; discarded: number }> {
-  const rows: { id: number; totp_secret: string }[] = await k.selectFrom('users').select(['id', 'totp_secret']).where('totp_secret', 'is not', null).execute();
   let changed = 0;
   let discarded = 0;
   let unreadable = 0;
-  for (const r of rows) {
-    let plain: string;
-    if (!secrets.isSealed(r.totp_secret)) plain = r.totp_secret;
-    else if (secrets.isCurrent(r.totp_secret)) {
-      try {
-        secrets.open(r.totp_secret, totpContext(r.id));
-        continue;
-      } catch {
-        unreadable++;
-        continue;
-      }
-    } else {
-      try {
-        plain = secrets.open(r.totp_secret, totpContext(r.id));
-      } catch {
-        unreadable++;
-        continue;
-      }
-    }
-    await k.updateTable('users').set({ totp_secret: sealTotpSecret(secrets, r.id, plain) }).where('id', '=', r.id).execute();
-    changed++;
-  }
-  if (unreadable && opts.discardUnreadable) {
+  for (const column of ['totp_secret', 'totp_pending'] as const) {
+    const rows: { id: number; value: string }[] = await k.selectFrom('users').select(['id', `${column} as value`]).where(column, 'is not', null).execute();
     for (const r of rows) {
-      if (!secrets.isSealed(r.totp_secret)) continue;
-      try {
-        secrets.open(r.totp_secret, totpContext(r.id));
-      } catch {
-        await k.updateTable('users').set({ totp_secret: null, totp_enabled: 0 }).where('id', '=', r.id).execute();
-        discarded++;
+      let plain: string;
+      if (!secrets.isSealed(r.value)) plain = r.value;
+      else {
+        const current = secrets.isCurrent(r.value);
+        try {
+          plain = secrets.open(r.value, totpContext(r.id, column));
+        } catch {
+          unreadable++;
+          if (opts.discardUnreadable) {
+            await k.updateTable('users').set(column === 'totp_secret' ? { totp_secret: null, totp_enabled: 0 } : { totp_pending: null }).where('id', '=', r.id).execute();
+            discarded++;
+          }
+          continue;
+        }
+        if (current) continue;
       }
+      await k.updateTable('users').set({ [column]: sealTotpSecret(secrets, r.id, plain, column) }).where('id', '=', r.id).execute();
+      changed++;
     }
-  } else if (unreadable) {
+  }
+  if (unreadable && !opts.discardUnreadable) {
     throw new SecretKeyError(
       `${unreadable} authenticator secret(s) cannot be opened with the key(s) available.\n` +
         '  If the key was changed on purpose, put the old one in COMMERCIA_SECRET_KEY_PREVIOUS. If it is lost for good, run:\n' +

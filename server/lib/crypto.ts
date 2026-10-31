@@ -67,9 +67,21 @@ export function totpCode(secret: string, time = Date.now(), step = 30): string {
   return code.toString().padStart(6, '0');
 }
 
-/** Accepts the current code and one step either side, for clock drift. */
-export function verifyTotp(secret: string, code: string, time = Date.now()): boolean {
+/**
+ * Accepts the current code and one step either side, for clock drift. Returns the time step the code belongs to
+ * (so the caller can refuse to take the same step twice), or null if it is wrong.
+ */
+export function verifyTotpStep(secret: string, code: string, time = Date.now()): number | null {
   const c = code.replace(/\s/g, '');
-  if (!/^\d{6}$/.test(c)) return false;
-  return [-1, 0, 1].some((d) => totpCode(secret, time + d * 30000) === c);
+  if (!/^\d{6}$/.test(c)) return null;
+  let found: number | null = null;
+  for (const d of [-1, 0, 1]) {
+    const t = time + d * 30000;
+    const expected = Buffer.from(totpCode(secret, t));
+    // Always compare all three, and in constant time.
+    if (crypto.timingSafeEqual(expected, Buffer.from(c)) && found === null) found = Math.floor(t / 1000 / 30);
+  }
+  return found;
 }
+
+export const verifyTotp = (secret: string, code: string, time = Date.now()): boolean => verifyTotpStep(secret, code, time) !== null;

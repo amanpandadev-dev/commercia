@@ -19,6 +19,10 @@ export interface UsersTable {
   lang: string;
   totp_secret: string | null;
   totp_enabled: number;
+  /** A new authenticator being set up: it replaces totp_secret only when its first code is confirmed. */
+  totp_pending: Generated<string | null>;
+  /** The time step of the last authenticator code accepted: a code is never accepted twice. */
+  totp_last_step: Generated<number | null>;
   /** Bumped on deactivate / sign out everywhere; sessions older than it die. */
   session_epoch: number;
   created_at: string;
@@ -29,9 +33,39 @@ export interface SessionsTable {
   user_id: number;
   epoch: number;
   totp_ok: number;
+  /** 1 once this session has proved it may set up an authenticator (an enrolment code, or first-time setup). */
+  enrol_ok: Generated<number>;
+  /** Until when a recent password check counts for sensitive actions. */
+  reauth_until: Generated<string | null>;
+  ip: Generated<string>;
+  /** "Chrome on Windows" and the like, from the browser's own description. */
+  device: Generated<string>;
+  ua_hash: Generated<string>;
   created_at: string;
   last_seen: string;
   expires_at: string;
+}
+
+/** One-use codes to get back in without the phone. Only a hash is kept. */
+export interface RecoveryCodesTable {
+  id: Generated<number>;
+  user_id: number;
+  code_hash: string;
+  used_at: string | null;
+  created_at: string;
+}
+
+/** One-time codes that allow a person to set up an authenticator: emailed to them, or issued by an Admin or Owner. */
+export interface EnrolmentCodesTable {
+  id: Generated<number>;
+  user_id: number;
+  kind: 'email' | 'admin';
+  code_hash: string;
+  issued_by: number | null;
+  expires_at: string;
+  attempts: number;
+  used_at: string | null;
+  created_at: string;
 }
 
 export interface CategoriesTable {
@@ -431,6 +465,8 @@ export interface DB {
   supplier_ledger: SupplierLedgerTable;
   password_resets: PasswordResetsTable;
   auth_throttle: AuthThrottleTable;
+  recovery_codes: RecoveryCodesTable;
+  enrolment_codes: EnrolmentCodesTable;
   activity: ActivityTable;
   versions: VersionsTable;
   imports: ImportsTable;
